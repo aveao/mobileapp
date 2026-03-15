@@ -27,6 +27,7 @@ import io.rebble.libpebblecommon.notification.NotificationDecision.NotSendContac
 import io.rebble.libpebblecommon.notification.NotificationDecision.NotSentAppMuted
 import io.rebble.libpebblecommon.notification.NotificationDecision.NotSentDuplicate
 import io.rebble.libpebblecommon.notification.NotificationDecision.NotSentLocalOnly
+import io.rebble.libpebblecommon.notification.NotificationDecision.NotSentRegexFiltered
 import io.rebble.libpebblecommon.notification.NotificationDecision.SendToWatch
 import io.rebble.libpebblecommon.util.PrivateLogger
 import io.rebble.libpebblecommon.util.obfuscate
@@ -153,9 +154,19 @@ class NotificationHandler(
         }
         val anyContactMuted = notification.people.any { it.muteState == MuteState.Always }
         val anyContactStarred = notification.people.any { it.muteState == MuteState.Exempt }
+        val regexFiltered = if (appEntry.filterRegexes.isNotEmpty()) {
+            val anyMatches = appEntry.filterRegexes.any { pattern ->
+                val regex = Regex(pattern)
+                val titleMatches = notification.title?.let { regex.containsMatchIn(it) } ?: false
+                val bodyMatches = notification.body?.let { regex.containsMatchIn(it) } ?: false
+                titleMatches || bodyMatches
+            }
+            if (appEntry.filterRegexIsAllowlist == true) !anyMatches else anyMatches
+        } else false
         val decision = when {
             sbn.notification.isLocalOnly() && !notificationConfig.value.sendLocalOnlyNotifications ->
                 NotSentLocalOnly
+            regexFiltered -> NotSentRegexFiltered
             anyContactMuted -> NotSendContactMuted
             !anyContactStarred && appEntry.muteState == MuteState.Always -> NotSentAppMuted
             !anyContactStarred && (channel != null && channel.muteState == MuteState.Always) -> NotSendChannelMuted
