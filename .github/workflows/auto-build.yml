@@ -69,6 +69,7 @@ jobs:
         with:
           tag_name: auto-build-${{ steps.version.outputs.sha }}
           name: Auto Build ${{ steps.version.outputs.sha }}
+          target_commitish: ${{ github.sha }}
           prerelease: true
           files: ${{ steps.apk.outputs.path }}
           body: |
@@ -82,6 +83,7 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           prerelease: false
+          target_commitish: ${{ github.sha }}
           files: ${{ steps.apk.outputs.path }}
           body: |
             Release build from tag `${{ github.ref_name }}`.
