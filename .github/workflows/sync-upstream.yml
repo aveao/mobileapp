@@ -1,0 +1,41 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: auto-build
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/coredevices/mobileapp.git
+
+      - name: Fetch upstream
+        run: git fetch upstream master
+
+      - name: Check for new commits
+        id: check
+        run: |
+          NEW_COMMITS=$(git rev-list HEAD..upstream/master --count)
+          echo "count=${NEW_COMMITS}" >> "$GITHUB_OUTPUT"
+          echo "Upstream has ${NEW_COMMITS} new commit(s)"
+
+      - name: Merge upstream
+        if: steps.check.outputs.count != '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git merge upstream/master --no-edit
+
+      - name: Push
+        if: steps.check.outputs.count != '0'
+        run: git push origin auto-build
