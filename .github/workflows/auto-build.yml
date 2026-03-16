@@ -71,7 +71,7 @@ jobs:
           body: |
             Automated debug build from `auto-build` branch.
             Commit: ${{ github.sha }}
-          make_latest: false
+          make_latest: true
 
       - name: Create release (tag)
         if: startsWith(github.ref, 'refs/tags/')
