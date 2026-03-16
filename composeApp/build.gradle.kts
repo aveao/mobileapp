@@ -286,6 +286,9 @@ android {
         getByName("debug") {
             isMinifyEnabled = false
             isDebuggable = true
+            configure<com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension> {
+                mappingFileUploadEnabled = false
+            }
         }
     }
     compileOptions {
