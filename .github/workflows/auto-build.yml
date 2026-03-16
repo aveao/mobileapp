@@ -1,0 +1,83 @@
+name: Auto Build
+
+on:
+  push:
+    branches: [auto-build]
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Cache build deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-deps-${{ runner.os }}-${{ hashFiles('gradle/**', 'gradlew*', 'gradle.properties', '*.gradle*') }}
+          restore-keys: |
+            android-deps-${{ runner.os }}-
+
+      - name: Write google-services.json
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > composeApp/src/google-services.json
+
+      - name: Decode debug signing key
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+
+      - name: Build debug APK
+        run: ./gradlew :composeApp:assembleDebug
+        env:
+          GITHUB_ACTOR: ${{ secrets.READ_PACKAGES_ACTOR }}
+          GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN }}
+
+      - name: Get version info
+        id: version
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Find APK
+        id: apk
+        run: |
+          APK=$(find composeApp/build/outputs/apk/debug -name '*.apk' | head -1)
+          echo "path=${APK}" >> "$GITHUB_OUTPUT"
+          echo "Found APK: ${APK}"
+
+      - name: Create pre-release (push)
+        if: startsWith(github.ref, 'refs/tags/') != true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: auto-build-${{ steps.version.outputs.sha }}
+          name: Auto Build ${{ steps.version.outputs.sha }}
+          prerelease: true
+          files: ${{ steps.apk.outputs.path }}
+          body: |
+            Automated debug build from `auto-build` branch.
+            Commit: ${{ github.sha }}
+          make_latest: false
+
+      - name: Create release (tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          prerelease: false
+          files: ${{ steps.apk.outputs.path }}
+          body: |
+            Release build from tag `${{ github.ref_name }}`.
+            Commit: ${{ github.sha }}
