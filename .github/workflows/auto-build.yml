@@ -36,13 +36,16 @@ jobs:
 
       - name: Decode debug signing key
         run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
-          keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey > /dev/null
-          echo "Debug keystore OK ($(wc -c < ~/.android/debug.keystore) bytes)"
+          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > ${{ github.workspace }}/debug.keystore
+          keytool -list -keystore ${{ github.workspace }}/debug.keystore -storepass android -alias androiddebugkey > /dev/null
 
       - name: Build debug APK
-        run: ./gradlew :composeApp:assembleDebug
+        run: |
+          ./gradlew :composeApp:assembleDebug \
+            -Pandroid.injected.signing.store.file=${{ github.workspace }}/debug.keystore \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
         env:
           GITHUB_ACTOR: ${{ secrets.READ_PACKAGES_ACTOR }}
           GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN }}
