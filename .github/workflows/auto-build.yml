@@ -38,6 +38,8 @@ jobs:
         run: |
           mkdir -p ~/.android
           echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey > /dev/null
+          echo "Debug keystore OK ($(wc -c < ~/.android/debug.keystore) bytes)"
 
       - name: Build debug APK
         run: ./gradlew :composeApp:assembleDebug
