@@ -39,3 +39,9 @@ jobs:
       - name: Push
         if: steps.check.outputs.count != '0'
         run: git push origin auto-build
+
+      - name: Trigger auto build
+        if: steps.check.outputs.count != '0'
+        run: gh workflow run auto-build.yml --ref auto-build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
