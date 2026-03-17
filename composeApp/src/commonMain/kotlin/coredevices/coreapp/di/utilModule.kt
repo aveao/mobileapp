@@ -26,6 +26,7 @@ import coredevices.util.CoreConfigHolder
 import coredevices.util.DoneInitialOnboarding
 import coredevices.util.OAuthRedirectHandler
 import coredevices.util.models.ModelManager
+import coredevices.util.transcription.CactusModelPathProvider
 import coredevices.util.transcription.CactusTranscriptionService
 import coredevices.util.transcription.TranscriptionService
 import coredevices.util.transcription.WisprFlowTranscriptionService
@@ -76,10 +77,26 @@ val utilModule = module {
     singleOf(::UserConfigDao)
     single { CoreConfigHolder(defaultValue = CoreConfig(), get(), get()) }
     single { CoreConfigFlow(get<CoreConfigHolder>().config) }
-    singleOf(::ModelManager)
+    single { ModelManager(get(), get(), getOrNull()) }
     singleOf(::OAuthRedirectHandler)
     singleOf(::WisprFlowAuth)
-    singleOf(::CactusTranscriptionService) bind TranscriptionService::class
+    single {
+        CactusTranscriptionService(
+            get(),
+            get(),
+            getOrNull<CactusModelPathProvider>() ?: object : CactusModelPathProvider {
+                override suspend fun getSTTModelPath(): String = throw IllegalStateException("CactusModelPathProvider not available")
+                override suspend fun getLMModelPath(): String = throw IllegalStateException("CactusModelPathProvider not available")
+                override fun isModelDownloaded(modelName: String): Boolean = false
+                override fun getDownloadedModels(): List<String> = emptyList()
+                override fun getIncompatibleModels(): List<String> = emptyList()
+                override fun deleteModel(modelName: String) {}
+                override fun getModelSizeBytes(modelName: String): Long = 0L
+                override fun initTelemetry() {}
+            },
+            getOrNull<coredevices.util.transcription.InferenceBoost>() ?: coredevices.util.transcription.NoOpInferenceBoost()
+        )
+    } bind TranscriptionService::class
     singleOf(::WisprFlowTranscriptionService)
     singleOf(::UsersDaoImpl) bind UsersDao::class
 }

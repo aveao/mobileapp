@@ -110,6 +110,7 @@ import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.KnownPebbleDevice
 import io.rebble.libpebblecommon.js.PKJSApp
+import io.rebble.libpebblecommon.metadata.WatchType
 import io.rebble.libpebblecommon.packets.ProtocolCapsFlag
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
@@ -406,7 +407,7 @@ please disable the option.""".trimIndent(),
         val appUpdateTracker: AppUpdateTracker = koinInject()
         val showChangelogBadge = remember { appUpdateTracker.appWasUpdated.value }
         val hasOfflineModels = remember {
-            modelManager.getDownloadedModelSlugs().any { it.startsWith("whisper", false) }
+            modelManager.getDownloadedModelSlugs().any { it.startsWith("parakeet", false) }
         }
         LaunchedEffect(Unit) {
             appUpdateTracker.acknowledgeCurrentVersion()
@@ -1099,6 +1100,7 @@ please disable the option.""".trimIndent(),
                             CactusSTTMode.RemoteOnly -> "Disabled"
                             CactusSTTMode.RemoteFirst -> "Fallback only"
                             CactusSTTMode.LocalOnly -> "Forced"
+                            CactusSTTMode.LocalFirst -> "Preferred"
                         }
                     },
                 ),
@@ -1218,6 +1220,24 @@ please disable the option.""".trimIndent(),
                     section = Section.Debug,
                     action = { postTestNotification(appContext) },
                     show = { pebbleFeatures.supportsPostTestNotification() },
+                ),
+                basicSettingsDropdownItem(
+                    title = "Watch type for unknown devices",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Debug,
+                    items = WatchType.entries,
+                    selectedItem = libPebbleConfig.watchConfig.unknownWatchTypePlatform,
+                    onItemSelected = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                watchConfig = libPebbleConfig.watchConfig.copy(
+                                    unknownWatchTypePlatform = it
+                                )
+                            )
+                        )
+                    },
+                    itemText = { it.name },
+                    isDebugSetting = true,
                 ),
                 basicSettingsActionItem(
                     title = "Force JSCore GC",

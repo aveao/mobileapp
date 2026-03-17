@@ -1,8 +1,9 @@
 package coredevices.coreapp
 
 import co.touchlab.kermit.Logger
-import com.cactus.CactusSTT
-import com.cactus.services.CactusConfig
+import com.mmk.kmpnotifier.notification.Notifier
+import com.mmk.kmpnotifier.notification.NotifierManager
+import coredevices.util.transcription.CactusModelPathProvider
 import com.russhwolf.settings.Settings
 import coredevices.CoreBackgroundSync
 import coredevices.ExperimentalDevices
@@ -23,6 +24,7 @@ import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
 import coredevices.util.DoneInitialOnboarding
 import coredevices.util.emailOrNull
+import coredevices.util.models.CactusSTTMode
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import io.rebble.libpebblecommon.connection.AppContext
@@ -59,23 +61,44 @@ class CommonAppDelegate(
     private val logger = Logger.withTag("CommonAppDelegate")
     private val syncInProgress = MutableStateFlow(false)
 
-    /**
-     * Fixes case people updated to new version with the setting for model after using the previous default,
-     * so we don't try to init with the new default they won't have downloaded.
-     */
-    private fun migrateCactusModelSetting() {
-        GlobalScope.launch {
-            try {
-                if (!settings.hasKey("cactus_stt_model")) {
-                    val model = CactusSTT().getVoiceModels()
-                        .firstOrNull { it.isDownloaded }
-                    model?.let {
-                        settings.putString("cactus_stt_model", it.slug)
+    private fun initCactus() {
+        val modelProvider = try {
+            org.koin.mp.KoinPlatform.getKoin().get<CactusModelPathProvider>()
+        } catch (e: Exception) {
+            logger.w(e) { "Cactus model provider not available" }
+            return
+        }
+        try {
+            modelProvider.initTelemetry()
+        } catch (e: Exception) {
+            logger.w(e) { "Cactus telemetry init skipped" }
+        }
+        try {
+            val incompatible = modelProvider.getIncompatibleModels()
+            if (incompatible.isNotEmpty()) {
+                logger.d { "Incompatible models found, deleting and notifying user to migrate" }
+                coreConfigHolder.update(
+                    coreConfigHolder.config.value.copy(
+                        sttConfig = coreConfigHolder.config.value.sttConfig.copy(
+                            mode = CactusSTTMode.RemoteOnly,
+                            modelName = null,
+                        )
+                    )
+                )
+                incompatible.forEach {
+                    try {
+                        modelProvider.deleteModel(it)
+                    } catch (e: Exception) {
+                        logger.w(e) { "Failed to delete incompatible model $it" }
                     }
                 }
-            } catch (e: Exception) {
-                logger.e(e) { "migrateCactusModelSetting failed" }
+                NotifierManager.getLocalNotifier().notify(
+                    "Offline voice recognition",
+                    "We've made improvements to our offline voice recognition. Please open the app to download the new model from settings."
+                )
             }
+        } catch (e: Exception) {
+            logger.w(e) { "Cactus incompatible model check skipped" }
         }
     }
 
@@ -104,9 +127,7 @@ class CommonAppDelegate(
         Firebase.auth.currentUser?.emailOrNull?.let {
             analyticsBackend.setUser(email = it)
         }
-        CactusConfig.setTelemetryToken("fca9de5c-bbf0-42b4-bd8a-722252542f70")
-        CommonBuildKonfig.CACTUS_PRO_KEY?.let { CactusConfig.setProKey(it) }
-        migrateCactusModelSetting()
+        initCactus()
         pushMessaging.init()
         bugReports.init()
         GlobalScope.launch(Dispatchers.Default) {
@@ -127,38 +148,42 @@ class CommonAppDelegate(
             logger.d { "Skipping background sync - already in progress" }
             return
         }
-
         val now = Clock.System.now()
-        val lastFullSync = Instant.fromEpochMilliseconds(settings.getLong(KEY_LAST_FULL_SYNC_MS, 0L))
-        val doFullSync = force || (now - lastFullSync) >= coreConfigHolder.config.value.regularSyncInterval
+        val lastFullSync =
+            Instant.fromEpochMilliseconds(settings.getLong(KEY_LAST_FULL_SYNC_MS, 0L))
+        val doFullSync =
+            force || (now - lastFullSync) >= coreConfigHolder.config.value.regularSyncInterval
         logger.d { "doBackgroundSync: doFullSync=$doFullSync" }
-        if (doFullSync) {
-            settings.putLong(KEY_LAST_FULL_SYNC_MS, now.toEpochMilliseconds())
+        try {
+            if (doFullSync) {
+                settings.putLong(KEY_LAST_FULL_SYNC_MS, now.toEpochMilliseconds())
+            }
+            val jobs = if (doFullSync) {
+                listOf(
+                    scope.launch {
+                        coreAnalytics.processHeartbeat()
+                    },
+                    scope.launch {
+                        pebbleAppDelegate.performBackgroundWork(scope)
+                    },
+                    scope.launch {
+                        appUpdate.updateAvailable.value
+                    },
+                    scope.launch {
+                        weatherFetcher.fetchWeather(scope)
+                    },
+                )
+            } else {
+                listOf(
+                    scope.launch {
+                        weatherFetcher.fetchWeather(scope)
+                    },
+                )
+            }
+            jobs.joinAll()
+        } finally {
+            syncInProgress.value = false
         }
-        val jobs = if (doFullSync) {
-            listOf(
-                scope.launch {
-                    coreAnalytics.processHeartbeat()
-                },
-                scope.launch {
-                    pebbleAppDelegate.performBackgroundWork(scope)
-                },
-                scope.launch {
-                    appUpdate.updateAvailable.value
-                },
-                scope.launch {
-                    weatherFetcher.fetchWeather(scope)
-                },
-            )
-        } else {
-            listOf(
-                scope.launch {
-                    weatherFetcher.fetchWeather(scope)
-                },
-            )
-        }
-        jobs.joinAll()
-        syncInProgress.value = false
         logger.d { "doBackgroundSync / finished doFullSync=$doFullSync" }
     }
 
