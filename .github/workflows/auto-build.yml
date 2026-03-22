@@ -32,6 +32,15 @@ jobs:
           restore-keys: |
             android-deps-${{ runner.os }}-
 
+      - name: Rebrand package to zone.ave.pebble
+        run: |
+          find . -type f \( -name '*.kt' -o -name '*.kts' -o -name '*.xml' -o -name '*.json' \) \
+            -not -path './.git/*' \
+            -exec sed -i 's/coredevices\.coreapp/zone.ave.pebble/g' {} +
+          find . -type f \( -name '*.kt' -o -name '*.xml' \) \
+            -not -path './.git/*' \
+            -exec sed -i 's/coredevices\/coreapp/zone\/ave\/pebble/g' {} +
+
       - name: Write google-services.json
         run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > composeApp/src/google-services.json
 
