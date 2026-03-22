@@ -97,6 +97,11 @@ import coredevices.util.CoreConfigHolder
 import coredevices.util.PermissionRequester
 import coredevices.util.STTConfig
 import coredevices.util.WeatherUnit
+import coredevices.pebble.config.applyConfigImport
+import coredevices.pebble.config.buildConfigExport
+import coredevices.pebble.config.deserializeExport
+import coredevices.pebble.config.serializeExport
+import coredevices.ui.ConfirmDialog
 import coredevices.util.emailOrNull
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.ModelDownloadStatus
@@ -112,11 +117,20 @@ import io.rebble.libpebblecommon.connection.KnownPebbleDevice
 import io.rebble.libpebblecommon.js.PKJSApp
 import io.rebble.libpebblecommon.metadata.WatchType
 import io.rebble.libpebblecommon.packets.ProtocolCapsFlag
+import io.rebble.libpebblecommon.util.getTempFilePath
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.io.buffered
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.readString
+import kotlinx.io.writeString
+import rememberOpenDocumentLauncher
+import PlatformShareLauncher
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
@@ -254,6 +268,48 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
         val updateState by appUpdate.updateAvailable.collectAsState()
         val (showCopyTokenDialog, setShowCopyTokenDialog) = remember { mutableStateOf(false) }
         val coreBackgroundSync: CoreBackgroundSync = koinInject()
+        val platformShareLauncher: PlatformShareLauncher = koinInject()
+        val showConfirmImport = remember { mutableStateOf(false) }
+        var pendingImportJson by remember { mutableStateOf<String?>(null) }
+        val launchImportFilePicker = rememberOpenDocumentLauncher { result ->
+            result?.firstOrNull()?.let { file ->
+                try {
+                    val jsonString = file.source.use { source ->
+                        source.readString()
+                    }
+                    // Validate it parses before showing dialog
+                    deserializeExport(jsonString)
+                    pendingImportJson = jsonString
+                    showConfirmImport.value = true
+                } catch (e: Exception) {
+                    scope.launch {
+                        localSnackbarHostState.showSnackbar("Error: Invalid config file")
+                    }
+                }
+            }
+        }
+        ConfirmDialog(
+            show = showConfirmImport,
+            title = "Import Config?",
+            text = "This will overwrite your current settings with the imported configuration.",
+            onConfirm = {
+                pendingImportJson?.let { jsonString ->
+                    try {
+                        val export = deserializeExport(jsonString)
+                        applyConfigImport(export, libPebble, coreConfigHolder)
+                        scope.launch {
+                            localSnackbarHostState.showSnackbar("Config imported successfully")
+                        }
+                    } catch (e: Exception) {
+                        scope.launch {
+                            localSnackbarHostState.showSnackbar("Error importing config")
+                        }
+                    }
+                    pendingImportJson = null
+                }
+            },
+            confirmText = "Import",
+        )
         if (showCopyTokenDialog) {
             PKJSCopyTokenDialog(onDismissRequest = { setShowCopyTokenDialog(false) })
         }
@@ -1351,6 +1407,45 @@ please disable the option.""".trimIndent(),
                     checked = coreConfig.interceptPKJSWeather,
                     onCheckChanged = {
                         coreConfigHolder.update(coreConfig.copy(interceptPKJSWeather = it))
+                    },
+                ),
+                basicSettingsActionItem(
+                    title = "Export Config",
+                    description = "Export all settings to a JSON file",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Settings,
+                    keywords = "backup save export",
+                    action = {
+                        scope.launch {
+                            try {
+                                val export = withContext(Dispatchers.IO) {
+                                    val exportData = buildConfigExport(
+                                        watchPrefsFlow = libPebble.watchPrefs,
+                                        coreConfig = coreConfig,
+                                        libPebbleConfig = libPebbleConfig,
+                                    )
+                                    val json = serializeExport(exportData)
+                                    val path = getTempFilePath(appContext, "pebble-config.json")
+                                    SystemFileSystem.sink(path).buffered().use { sink ->
+                                        sink.writeString(json)
+                                    }
+                                    path
+                                }
+                                platformShareLauncher.share(null, export, "application/json")
+                            } catch (e: Exception) {
+                                localSnackbarHostState.showSnackbar("Error exporting config")
+                            }
+                        }
+                    },
+                ),
+                basicSettingsActionItem(
+                    title = "Import Config",
+                    description = "Import settings from a JSON file",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Settings,
+                    keywords = "restore load import",
+                    action = {
+                        launchImportFilePicker(listOf("application/json", "*/*"))
                     },
                 ),
             ) + watchPrefs
