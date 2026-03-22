@@ -245,7 +245,7 @@ fun BugReportScreen(
 
                         BugReportState.UploadingAttachments -> Unit
                         is BugReportState.ReadyToShare -> {
-                            platformShareLauncher.share(it.name, it.file)
+                            platformShareLauncher.share(it.name, it.file, "application/octet-stream")
                             setSending(false)
                             setStatus("")
                             setSendingProgress(null)
