@@ -85,6 +85,22 @@ actual fun rememberOpenDocumentLauncher(onResult: (List<DocumentAttachment>?) ->
     }
 }
 
+@Composable
+actual fun rememberSaveDocumentLauncher(
+    mimeType: String,
+    onResult: (Boolean) -> Unit,
+): (suggestedName: String, sourcePath: kotlinx.io.files.Path) -> Unit {
+    val presentationController = LocalUIViewController.current
+    return { _, sourcePath ->
+        val fileUrl = NSURL.fileURLWithPath(sourcePath.toString())
+        val activityVC = platform.UIKit.UIActivityViewController(listOf(fileUrl), null)
+        activityVC.setCompletionWithItemsHandler { _, completed, _, _ ->
+            onResult(completed ?: false)
+        }
+        presentationController.presentViewController(activityVC, animated = true, completion = null)
+    }
+}
+
 @OptIn(ExperimentalUuidApi::class)
 @Composable
 actual fun rememberOpenPhotoLauncher(onResult: (List<DocumentAttachment>?) -> Unit): () -> Unit {
