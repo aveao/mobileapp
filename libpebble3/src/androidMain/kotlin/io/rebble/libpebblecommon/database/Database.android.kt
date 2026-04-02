@@ -13,3 +13,7 @@ internal actual fun getDatabaseBuilder(ctx: AppContext): RoomDatabase.Builder<Da
         name = dbFile.absolutePath
     )
 }
+
+actual fun getLibPebbleDatabasePath(ctx: AppContext): String {
+    return ctx.context.applicationContext.getDatabasePath(DATABASE_FILENAME).absolutePath
+}
