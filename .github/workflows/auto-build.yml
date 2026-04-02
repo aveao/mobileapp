@@ -32,6 +32,9 @@ jobs:
           restore-keys: |
             android-deps-${{ runner.os }}-
 
+      - name: Write local.properties (gradle)
+        run: echo '${{ secrets.GRADLE_LOCAL_PROPERTIES }}' > local.properties
+
       - name: Write google-services.json
         run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > composeApp/src/google-services.json
 
