@@ -39,6 +39,9 @@ object CommonRoutes {
 
     @Serializable
     data object OnboardingRoute : CoreRoute
+
+    @Serializable
+    data object LogViewerRoute : CoreRoute
 }
 
 @Stable

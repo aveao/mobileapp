@@ -1158,6 +1158,15 @@ please disable the option.""".trimIndent(),
                     },
                     isDebugSetting = true,
                 ),
+                basicSettingsActionItem(
+                    title = "View app logs",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Logging,
+                    action = {
+                        navBarNav.navigateTo(CommonRoutes.LogViewerRoute)
+                    },
+                    show = { debugOptionsEnabled },
+                ),
                 basicSettingsToggleItem(
                     title = "Collect app crashes",
                     description = "This allows us to fix crashes in the mobile app - otherwise we don't know how often they are happening, or how to fix them",
