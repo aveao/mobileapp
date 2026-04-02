@@ -8,6 +8,8 @@ import coredevices.EnableExperimentalDevices
 import coredevices.analytics.CoreAnalytics
 import coredevices.analytics.RealCoreAnalytics
 import coredevices.api.WisprFlowAuth
+import coredevices.coreapp.backup.BackupManager
+import coredevices.util.BackupRestore
 import coredevices.coreapp.CommonAppDelegate
 import coredevices.coreapp.push.PushMessaging
 import coredevices.coreapp.ui.navigation.CoreDeepLinkHandler
@@ -54,6 +56,7 @@ val utilModule = module {
         }
     }
 
+    singleOf(::BackupManager) bind BackupRestore::class
     singleOf(::FileLogWriter)
     singleOf(::BugReportProcessor)
     singleOf(::NextBugReportContext)
