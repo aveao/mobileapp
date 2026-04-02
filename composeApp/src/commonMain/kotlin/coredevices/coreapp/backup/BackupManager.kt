@@ -109,12 +109,11 @@ class BackupManager(
             zipFile.readTextEntry("settings.json") { text, _ -> settingsJson += text }
             val settings = json.decodeFromString<SettingsExport>(settingsJson)
 
-            // Close databases before overwriting files.
-            // libpebble3's Database is not directly accessible (private Koin scope),
-            // but the app restarts after restore so the stale connection is harmless.
+            // Close all databases before overwriting files
             logger.i { "Closing databases..." }
             coreDatabase.close()
             ringDatabase.close()
+            libPebble.closeDatabase()
 
             // Extract database files, WALs, and SHMs
             for ((filename, targetPath) in dbFiles) {
