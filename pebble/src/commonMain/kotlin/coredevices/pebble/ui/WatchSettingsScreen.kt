@@ -106,6 +106,11 @@ import com.cactus.isCactusSupported
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
+import DocumentAttachment
+import PlatformContext
+import coredevices.ui.ConfirmDialog
+import coredevices.util.BackupRestore
+import coredevices.util.restartApp
 import coredevices.EnableExperimentalDevices
 import coredevices.analytics.AnalyticsBackend
 import coredevices.analytics.CoreAnalytics
@@ -168,6 +173,8 @@ import coreapp.pebble.generated.resources.Res
 import coreapp.pebble.generated.resources.wispr_flow_logo_black
 import coreapp.pebble.generated.resources.wispr_flow_logo_white
 import org.jetbrains.compose.resources.painterResource
+import rememberOpenDocumentLauncher
+import rememberSaveDocumentLauncher
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
@@ -345,6 +352,59 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val updateState by appUpdate.updateAvailable.collectAsState()
     val (showCopyTokenDialog, setShowCopyTokenDialog) = remember { mutableStateOf(false) }
     val coreBackgroundSync: CoreBackgroundSync = koinInject()
+    val backupManager: BackupRestore = koinInject()
+    val platformContext: PlatformContext = koinInject()
+    var lastBackupPath by remember { mutableStateOf<kotlinx.io.files.Path?>(null) }
+    val launchSaveBackup = rememberSaveDocumentLauncher("application/octet-stream") { success ->
+        // Clean up temp file after save dialog closes
+        lastBackupPath?.let { path ->
+            try { kotlinx.io.files.SystemFileSystem.delete(path) } catch (_: Exception) {}
+            lastBackupPath = null
+        }
+        scope.launch {
+            if (success) {
+                snackbarDisplay.showSnackbar("Backup saved")
+            } else {
+                snackbarDisplay.showSnackbar("Backup was not saved")
+            }
+        }
+    }
+    val showConfirmRestore = remember { mutableStateOf(false) }
+    var pendingRestoreFile by remember { mutableStateOf<DocumentAttachment?>(null) }
+    val launchRestoreFilePicker = rememberOpenDocumentLauncher { result ->
+        result?.firstOrNull()?.let { file ->
+            logger.d { "Restore file picked: fileName='${file.fileName}', mimeType='${file.mimeType}'" }
+            if (!file.fileName.endsWith(".pebblebak")) {
+                scope.launch {
+                    snackbarDisplay.showSnackbar("Invalid file: expected a .pebblebak file (got '${file.fileName}')")
+                }
+                return@rememberOpenDocumentLauncher
+            }
+            pendingRestoreFile = file
+            showConfirmRestore.value = true
+        }
+    }
+    ConfirmDialog(
+        show = showConfirmRestore,
+        title = "Restore Backup?",
+        text = "WARNING: This is intended for developers and may cause unexpected behavior.\n\nThis will overwrite all app data with the backup contents. The app will restart after restoring. Re-pairing your watch may be necessary for notifications to function.",
+        onConfirm = {
+            pendingRestoreFile?.let { file ->
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            backupManager.restoreBackup(file.source)
+                        }
+                        restartApp(platformContext)
+                    } catch (e: Exception) {
+                        snackbarDisplay.showSnackbar("Error restoring backup: ${e.message}")
+                    }
+                }
+                pendingRestoreFile = null
+            }
+        },
+        confirmText = "Restore",
+    )
     if (showCopyTokenDialog) {
         PKJSCopyTokenDialog(onDismissRequest = { setShowCopyTokenDialog(false) })
     }
@@ -1874,6 +1934,43 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         }
                     },
                     isDebugSetting = true,
+                ),
+                basicSettingsActionItem(
+                    title = "Backup Data",
+                    description = "Export all databases and settings to a backup file",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Debug,
+                    keywords = "backup export save",
+                    isDebugSetting = true,
+                    action = {
+                        scope.launch {
+                            try {
+                                snackbarDisplay.showSnackbar("Creating backup...")
+                                val path = withContext(Dispatchers.IO) {
+                                    backupManager.createBackup()
+                                }
+                                lastBackupPath = path
+                                val formattedTime = path.name
+                                    .removePrefix("backup-")
+                                    .removeSuffix(".pebblebak")
+                                    .replace(":", "-")
+                                launchSaveBackup("pebble-app-backup-$formattedTime.pebblebak", path)
+                            } catch (e: Exception) {
+                                snackbarDisplay.showSnackbar("Error creating backup: ${e.message}")
+                            }
+                        }
+                    },
+                ),
+                basicSettingsActionItem(
+                    title = "Restore Data",
+                    description = "Restore databases and settings from a backup file",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Debug,
+                    keywords = "restore import load",
+                    isDebugSetting = true,
+                    action = {
+                        launchRestoreFilePicker(listOf("application/octet-stream", "*/*"))
+                    },
                 ),
                 basicSettingsActionItem(
                     title = "Copy PKJS account token",
