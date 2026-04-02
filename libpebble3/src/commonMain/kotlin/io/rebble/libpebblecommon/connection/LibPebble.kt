@@ -34,6 +34,7 @@ import io.rebble.libpebblecommon.database.entity.OverlayDataEntity
 import io.rebble.libpebblecommon.database.entity.TimelineNotification
 import io.rebble.libpebblecommon.database.entity.TimelinePin
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
+import io.rebble.libpebblecommon.database.getLibPebbleDatabasePath
 import io.rebble.libpebblecommon.di.initKoin
 import io.rebble.libpebblecommon.health.Health
 import io.rebble.libpebblecommon.health.HealthDebugStats
@@ -90,6 +91,8 @@ interface LibPebble : Scanning, RequestSync, LockerApi, NotificationApps, CallMa
 
     val config: StateFlow<LibPebbleConfig>
     fun updateConfig(config: LibPebbleConfig)
+
+    fun getDatabasePath(): String
 
     // Generally, use these. They will act on all watches (or all connected watches, if that makes
     // sense)
@@ -336,6 +339,7 @@ class LibPebble3(
     private val vibePatternDao: VibePatternDao,
     private val watchPreferences: WatchPrefs,
     private val weatherManager: WeatherManager,
+    private val appContext: AppContext,
 ) : LibPebble, Scanning by scanning, RequestSync by webSyncManager, LockerApi by locker,
     NotificationApps by notificationApi, Calendar by phoneCalendarSyncer,
     OtherPebbleApps by otherPebbleApps, PKJSToken by jsTokenUtil, Watches by watchManager,
@@ -380,6 +384,10 @@ class LibPebble3(
     override fun updateConfig(config: LibPebbleConfig) {
         logger.d("Updated config: $config")
         libPebbleConfigFlow.update(config)
+    }
+
+    override fun getDatabasePath(): String {
+        return getLibPebbleDatabasePath(appContext)
     }
 
     override val currentCall: MutableStateFlow<Call?> = MutableStateFlow(null)
