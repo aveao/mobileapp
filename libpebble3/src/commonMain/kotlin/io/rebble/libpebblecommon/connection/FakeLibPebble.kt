@@ -102,6 +102,10 @@ class FakeLibPebble : LibPebble {
         // No-op
     }
 
+    override fun getDatabasePath(): String {
+        return ""
+    }
+
     override suspend fun sendNotification(
         notification: TimelineNotification,
         actionHandlers: Map<UByte, CustomTimelineActionHandler>?
