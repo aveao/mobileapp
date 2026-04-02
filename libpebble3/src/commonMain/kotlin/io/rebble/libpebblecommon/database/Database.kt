@@ -171,3 +171,5 @@ fun getRoomDatabase(ctx: AppContext): Database {
 }
 
 internal expect fun getDatabaseBuilder(ctx: AppContext): RoomDatabase.Builder<Database>
+
+expect fun getLibPebbleDatabasePath(ctx: AppContext): String
