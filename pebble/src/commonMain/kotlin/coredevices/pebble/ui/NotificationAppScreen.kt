@@ -32,6 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -197,12 +198,11 @@ fun NotificationAppScreen(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 4.dp),
                                 ) {
-                                    Text("Channels", fontSize = 20.sp, modifier = Modifier.padding(5.dp))
+                                    Text("Channels", fontSize = 20.sp)
                                     FilterChip(
-                                        modifier = Modifier.padding(5.dp),
                                         onClick = {
                                             viewModel.onlyNotified.value = !viewModel.onlyNotified.value
                                         },
@@ -223,35 +223,35 @@ fun NotificationAppScreen(
                                         },
                                     )
                                 }
+                                channelGroups.forEach { group ->
+                                    if (channelGroups.size > 1) {
+                                        ListItem(
+                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                            headlineContent = {
+                                                Text(
+                                                    text = group.name ?: "Default Group",
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(vertical = 8.dp),
+                                                )
+                                            }
+                                        )
+                                    }
+                                    group.channels.forEach { channel ->
+                                        ChannelCard(
+                                            channelItem = channel,
+                                            app = app,
+                                            notificationApps = notificationApps,
+                                            channelCounts = channelCounts,
+                                            nav = nav,
+                                        )
+                                    }
+                                    if (group != channelGroups.last()) {
+                                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                                    }
+                                }
                             }
                         }
-                    }
-                    items(
-                        items = channelGroups,
-                        key = { it.id },
-                    ) { group ->
-                        if (channelGroups.size > 1) {
-                            ListItem(
-                                headlineContent = {
-                                    Text(
-                                        text = group.name ?: "Default Group",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                    )
-                                }
-                            )
-                        }
-                        group.channels.forEach { channel ->
-                            ChannelCard(
-                                channelItem = channel,
-                                app = app,
-                                notificationApps = notificationApps,
-                                channelCounts = channelCounts,
-                                nav = nav,
-                            )
-                        }
-                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                     }
                 }
             }
@@ -273,7 +273,7 @@ private fun NotificationRulesSection(
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         modifier = Modifier.padding(10.dp).fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text("Notification filter rules", fontSize = 20.sp, modifier = Modifier.padding(bottom = 8.dp))
             if (rules.isEmpty()) {
                 Text(
@@ -515,6 +515,7 @@ private fun ChannelCard(
     } else Modifier
     ListItem(
         modifier = modifier,
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(channelItem.name, fontSize = 17.sp)
