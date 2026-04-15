@@ -82,6 +82,13 @@ class BackupManager(
                     logger.d { "Added $filename-shm (${shmFile.size} bytes)" }
                 }
             }
+
+            // Add cached PBW files. Sideloaded apps can't be re-fetched, so they must be
+            // included; store-app caches come along too since we zip the whole directory.
+            val pbwDir = Path(libPebble.getPbwCacheDirectory())
+            if (SystemFileSystem.exists(pbwDir)) {
+                addDirectoryToZip(zipFile, pbwDir, "pbw")
+            }
         }
 
         logger.i { "Backup created at $zipPath (${File(zipPathStr).size} bytes)" }
@@ -131,6 +138,20 @@ class BackupManager(
                     }
                 }
             }
+
+            // Restore PBW cache. Clear existing first so stale entries from the old install
+            // don't linger after restore.
+            val pbwDir = Path(libPebble.getPbwCacheDirectory())
+            clearDirectory(pbwDir)
+            SystemFileSystem.createDirectories(pbwDir, false)
+            val pbwEntries = zipEntryNames.filter { it.startsWith("pbw/") && !it.endsWith("/") }
+            for (entryName in pbwEntries) {
+                val relative = entryName.removePrefix("pbw/")
+                val targetPath = Path(pbwDir, relative)
+                SystemFileSystem.createDirectories(targetPath.parent ?: pbwDir, false)
+                extractEntry(zipFile, entryName, targetPath.toString())
+            }
+            logger.d { "Restored ${pbwEntries.size} PBW cache files" }
 
             // Restore settings
             logger.i { "Restoring settings..." }
@@ -206,5 +227,29 @@ class BackupManager(
 
     private fun deleteIfExists(path: String) {
         try { SystemFileSystem.delete(Path(path)) } catch (_: Exception) {}
+    }
+
+    private suspend fun addDirectoryToZip(zipFile: ZipFile, dir: Path, entryPrefix: String) {
+        SystemFileSystem.list(dir).forEach { child ->
+            val meta = SystemFileSystem.metadataOrNull(child) ?: return@forEach
+            val entryName = "$entryPrefix/${child.name}"
+            if (meta.isRegularFile) {
+                zipFile.zipFile(File(child.toString()), entryName)
+                logger.d { "Added $entryName (${meta.size} bytes)" }
+            } else if (meta.isDirectory) {
+                addDirectoryToZip(zipFile, child, entryName)
+            }
+        }
+    }
+
+    private fun clearDirectory(dir: Path) {
+        if (!SystemFileSystem.exists(dir)) return
+        SystemFileSystem.list(dir).forEach { child ->
+            val meta = SystemFileSystem.metadataOrNull(child)
+            if (meta?.isDirectory == true) {
+                clearDirectory(child)
+            }
+            try { SystemFileSystem.delete(child) } catch (_: Exception) {}
+        }
     }
 }
