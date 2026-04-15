@@ -35,6 +35,7 @@ import io.rebble.libpebblecommon.database.entity.TimelineNotification
 import io.rebble.libpebblecommon.database.entity.TimelinePin
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.database.getLibPebbleDatabasePath
+import io.rebble.libpebblecommon.locker.getLockerPBWCacheDirectory
 import io.rebble.libpebblecommon.di.initKoin
 import io.rebble.libpebblecommon.health.Health
 import io.rebble.libpebblecommon.health.HealthDebugStats
@@ -93,6 +94,7 @@ interface LibPebble : Scanning, RequestSync, LockerApi, NotificationApps, CallMa
     fun updateConfig(config: LibPebbleConfig)
 
     fun getDatabasePath(): String
+    fun getPbwCacheDirectory(): String
     suspend fun closeDatabase()
 
     // Generally, use these. They will act on all watches (or all connected watches, if that makes
@@ -389,6 +391,10 @@ class LibPebble3(
 
     override fun getDatabasePath(): String {
         return getLibPebbleDatabasePath(appContext)
+    }
+
+    override fun getPbwCacheDirectory(): String {
+        return getLockerPBWCacheDirectory(appContext).toString()
     }
 
     override suspend fun closeDatabase() {
