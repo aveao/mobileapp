@@ -57,13 +57,20 @@ class Cohorts(
             logger.e { "Couldn't parse firmware version from response" }
             return FirmwareUpdateCheckResult.UpdateCheckFailed("Failed to check for PebbleOS update")
         }
+        logger.i {
+            "latest firmware for $hardware: ${normalFw.friendlyVersion} (url=${normalFw.url}, " +
+                "timestamp=${normalFw.timestamp}); running=${watch.runningFwVersion} " +
+                "(isRecovery=${watch.runningFwVersion.isRecovery})"
+        }
         if (watch.runningFwVersion.isRecovery || latestFwVersion > watch.runningFwVersion) {
+            logger.i { "update available: $latestFwVersion" }
             return FirmwareUpdateCheckResult.FoundUpdate(
                 version = latestFwVersion,
                 url = normalFw.url,
                 notes = normalFw.notes.orEmpty(),
             )
         } else {
+            logger.i { "no update: running $latestFwVersion" }
             return FirmwareUpdateCheckResult.FoundNoUpdate
         }
     }
