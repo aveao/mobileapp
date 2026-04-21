@@ -42,6 +42,6 @@ jobs:
 
       - name: Trigger auto build
         if: steps.check.outputs.count != '0'
-        run: gh workflow run auto-build.yml --ref auto-build
+        run: gh workflow run auto-build.yml --ref auto-build --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
