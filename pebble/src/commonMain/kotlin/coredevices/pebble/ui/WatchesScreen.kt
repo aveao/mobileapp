@@ -66,6 +66,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -81,6 +82,7 @@ import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
@@ -130,7 +132,10 @@ import coredevices.libindex.device.KnownIndexDevice
 import coredevices.libindex.device.IndexIdentifier
 import coredevices.libindex.device.IndexPairingResult
 import coredevices.libindex.device.IndexPairingState
+import coredevices.libindex.device.PairingRequestResult
 import coredevices.libindex.device.InterviewedIndexDevice
+import coredevices.libindex.ui.components.Press
+import coredevices.libindex.ui.components.PressPatternDot
 import coredevices.pebble.PebbleFeatures
 import coredevices.pebble.account.PebbleAccount
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
@@ -140,12 +145,15 @@ import coredevices.pebble.services.LanguagePackRepository
 import coredevices.pebble.services.displayName
 import coredevices.ui.ConfirmDialog
 import coredevices.ui.CoreLinearProgressIndicator
+import coredevices.ui.M3Dialog
 import coredevices.ui.PebbleElevatedButton
 import coredevices.util.CompanionDevice
 import coredevices.util.CoreConfigFlow
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.PermissionResult
+import coredevices.util.Platform
+import coredevices.util.isIOS
 import coredevices.util.rememberUiContext
 import io.rebble.libpebblecommon.connection.ActiveDevice
 import io.rebble.libpebblecommon.connection.AppContext
@@ -175,6 +183,7 @@ import io.rebble.libpebblecommon.timeline.toPebbleColor
 import io.rebble.libpebblecommon.util.getTempFilePath
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -205,47 +214,55 @@ private val logger = Logger.withTag("WatchesScreen")
 fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
     val libPebble = rememberLibPebble()
     val libIndex = koinInject<LibIndex>()
-    val isScanningBle by combine(libPebble.isScanningBle, libIndex.isScanning) {
-        scanningBle, scanningIndex -> scanningBle || scanningIndex
+    val pebbleFeatures = koinInject<PebbleFeatures>()
+    val isScanning by combine(
+        libPebble.isScanningBle,
+        libPebble.isScanningClassic,
+        libIndex.isScanning,
+    ) { scanningBle, scanningClassic, scanningIndex ->
+        scanningBle || scanningClassic || scanningIndex
     }.collectAsState(false)
     val scope = rememberCoroutineScope()
     val permissionRequester: PermissionRequester = koinInject()
     val requiredScanPermission = remember { scanPermission() }
     val bluetoothEnabled by libPebble.bluetoothEnabled.collectAsState()
     var addFabExpanded by remember { mutableStateOf(false) }
-    val showPairIndex by libIndex.rings.map { it.filter { it !is DiscoveredIndexDevice }.isEmpty() }
-        .collectAsState(initial = true)
+    val indexAlreadyPaired by libIndex.rings.map { rings -> rings.any { it !is DiscoveredIndexDevice } }
+        .collectAsState(initial = false)
+    var showIndexAlreadyPairedDialog by remember { mutableStateOf(false) }
+    var fabInfoDialog by remember { mutableStateOf<FabInfo?>(null) }
+
+    suspend fun ensureScanPermission(uiContext: PlatformUiContext): Boolean {
+        if (requiredScanPermission != null && permissionRequester.missingPermissions.value.contains(
+                requiredScanPermission
+            )
+        ) {
+            val result = permissionRequester.requestPermission(requiredScanPermission, uiContext)
+            if (result != PermissionResult.Granted) {
+                logger.w { "Failed to grant scan permission" }
+                return false
+            }
+        }
+        return true
+    }
 
     fun scan(uiContext: PlatformUiContext) {
         scope.launch {
-            if (requiredScanPermission != null && permissionRequester.missingPermissions.value.contains(
-                    requiredScanPermission
-                )
-            ) {
-                val result =
-                    permissionRequester.requestPermission(requiredScanPermission, uiContext)
-                if (result != PermissionResult.Granted) {
-                    logger.w { "Failed to grant scan permission" }
-                    return@launch
-                }
-            }
+            if (!ensureScanPermission(uiContext)) return@launch
             libPebble.startBleScan()
+        }
+    }
+
+    fun scanClassic(uiContext: PlatformUiContext) {
+        scope.launch {
+            if (!ensureScanPermission(uiContext)) return@launch
+            libPebble.startClassicScan()
         }
     }
 
     fun scanIndex(uiContext: PlatformUiContext) {
         scope.launch {
-            if (requiredScanPermission != null && permissionRequester.missingPermissions.value.contains(
-                    requiredScanPermission
-                )
-            ) {
-                val result =
-                    permissionRequester.requestPermission(requiredScanPermission, uiContext)
-                if (result != PermissionResult.Granted) {
-                    logger.w { "Failed to grant scan permission" }
-                    return@launch
-                }
-            }
+            if (!ensureScanPermission(uiContext)) return@launch
             libIndex.startScan()
         }
     }
@@ -258,10 +275,11 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                 ) {
                     Icon(Icons.Filled.BluetoothDisabled, "Bluetooth is disabled")
                 }
-            } else if (isScanningBle) {
+            } else if (isScanning) {
                 FloatingActionButton(
                     onClick = {
                         libPebble.stopBleScan()
+                        libPebble.stopClassicScan()
                         libIndex.stopScan()
                     }
                 ) {
@@ -285,17 +303,33 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                     },
                 ) {
                     val uiContext = rememberUiContext()
-                    // TODO bt classic goes here
-                    if (showPairIndex) {
+                    FloatingActionButtonMenuItem(
+                        onClick = {
+                            addFabExpanded = false
+                            if (indexAlreadyPaired) {
+                                showIndexAlreadyPairedDialog = true
+                            } else if (uiContext != null) {
+                                scanIndex(uiContext)
+                            }
+                        },
+                        icon = { Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "Scan") },
+                        text = { Text("Add Index 01") },
+                    )
+                    if (pebbleFeatures.supportsBtClassic()) {
                         FloatingActionButtonMenuItem(
                             onClick = {
                                 addFabExpanded = false
                                 if (uiContext != null) {
-                                    scanIndex(uiContext)
+                                    scanClassic(uiContext)
                                 }
                             },
-                            icon = { Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "Scan") },
-                            text = { Text("Add Index 01") },
+                            icon = { Icon(Icons.Default.Watch, contentDescription = "Classic Watch") },
+                            text = {
+                                FabMenuItemLabel(
+                                    text = "Add Classic Watch",
+                                    onInfoClick = { fabInfoDialog = FabInfo.ClassicWatch },
+                                )
+                            },
                         )
                     }
                     FloatingActionButtonMenuItem(
@@ -306,7 +340,12 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             }
                         },
                         icon = { Icon(Icons.Default.Watch, contentDescription = "Watch") },
-                        text = { Text("Add Watch") },
+                        text = {
+                            FabMenuItemLabel(
+                                text = "Add Watch",
+                                onInfoClick = { fabInfoDialog = FabInfo.Watch },
+                            )
+                        },
                     )
                 }
             }
@@ -317,7 +356,6 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
             val otherPebbleAppsInstalledFlow =
                 remember { libPebble.otherPebbleCompanionAppsInstalled() }
             val otherPebbleAppsInstalled by otherPebbleAppsInstalledFlow.collectAsState()
-            val pebbleFeatures = koinInject<PebbleFeatures>()
             val coreConfigFlow = koinInject<CoreConfigFlow>()
             val coreConfig by coreConfigFlow.flow.collectAsState()
             val showOtherPebbleAppsWarningAndPreventConnection =
@@ -420,7 +458,7 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                         )
                     }
                 }
-                if (isScanningBle) {
+                if (isScanning) {
                     Text(
                         text = "Scanning for devices...",
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(5.dp)
@@ -500,6 +538,74 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
             }
         }
     }
+
+    val platform = koinInject<Platform>()
+    if (showIndexAlreadyPairedDialog) {
+        AlertDialog(
+            onDismissRequest = { showIndexAlreadyPairedDialog = false },
+            title = { Text("Index 01 already paired") },
+            text = {
+                Column {
+                    Text("An Index 01 is already paired to this phone. To pair a different Index 01, first unpair the existing one.")
+                    if (platform.isIOS) {
+                        Text("To unpair, first remove it from this app using the 3-dot menu, then go to Settings > Bluetooth, find the Index 01 in the list of devices, tap the info icon and choose \"Forget This Device\".")
+                        Text("After unpairing, reset the ring by pressing the button in an 'SOS' sequence as shown below.")
+                    } else {
+                        Text("To unpair, find the Index 01 in your Bluetooth settings and choose to forget/unpair it.")
+                        Text("After unpairing, reset the ring by pressing the button in an 'SOS' sequence as shown below.")
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    PressPatternDot(
+                        Press.SOS,
+                        size = 30.dp,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Text(
+                        "You'll see the light flash red green blue repeatedly when successful.",
+                        modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showIndexAlreadyPairedDialog = false }) { Text("OK") }
+            },
+        )
+    }
+    fabInfoDialog?.let { info ->
+        M3Dialog(
+            onDismissRequest = { fabInfoDialog = null },
+            title = { Text(info.title) },
+            buttons = {
+                TextButton(onClick = { fabInfoDialog = null }) { Text("Close") }
+            },
+        ) {
+            Text(info.body)
+        }
+    }
+}
+
+private enum class FabInfo(val title: String, val body: String) {
+    Watch(
+        title = "Add Watch",
+        body = "Use this for any modern Pebble that connects over Bluetooth Low Energy:\n\n" +
+                "Pebble Time 2, Core 2 Duo, Pebble Round 2 & Pebble 2.",
+    ),
+    ClassicWatch(
+        title = "Add Classic Watch",
+        body = "Use this for legacy Pebbles that connect over Bluetooth Classic:\n\n" +
+                "Original Pebble, Pebble Steel, Pebble Time, Pebble Time Steel, and " +
+                "Pebble Time Round.",
+    ),
+}
+
+@Composable
+private fun FabMenuItemLabel(text: String, onInfoClick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text)
+        IconButton(onClick = onInfoClick) {
+            Icon(Icons.Outlined.Info, contentDescription = "About $text")
+        }
+    }
 }
 
 @Preview
@@ -527,11 +633,12 @@ fun WatchesPreview() {
                                 override val name = "Index 01 02"
                                 override val firmwareVersion = "1.0.0"
                                 override val serialNumber = "SN12345678"
+                                override val updating: Boolean = false
                             }
                         )
                     )
 
-                    override fun init() {
+                    override fun init(bluetoothPermissionChanged: Flow<Boolean>) {
                         TODO("Not yet implemented")
                     }
 
@@ -570,6 +677,8 @@ sealed interface DeviceListEntry {
 @Composable
 fun RingItem(ring: IndexDevice, scope: CoroutineScope) {
     val coreAnalytics = koinInject<CoreAnalytics>()
+    val platform = koinInject<Platform>()
+    var showRingAlreadyPairedDialog by remember { mutableStateOf(false) }
     ListItem(
         headlineContent = {
             Text(
@@ -581,6 +690,7 @@ fun RingItem(ring: IndexDevice, scope: CoroutineScope) {
         supportingContent = {
             val stateText = when (ring) {
                 is DiscoveredIndexDevice -> "Available to pair"
+                is InterviewedIndexDevice if (ring.updating) -> "Updating..."
                 else -> "Ready"
             }
             Column {
@@ -629,7 +739,16 @@ fun RingItem(ring: IndexDevice, scope: CoroutineScope) {
                                         is IndexPairingResult.Success -> {
                                             coreAnalytics.logEvent("ring.pair_success")
                                         }
-                                        is IndexPairingResult.PairingFailure, null -> {
+                                        is IndexPairingResult.PairingFailure -> {
+                                            coreAnalytics.logEvent("ring.pair_failed", mapOf("reason" to "bonding_error"))
+                                            if (
+                                                result.cause is PairingRequestResult.RingAlreadyPaired ||
+                                                (platform.isIOS && result.cause is PairingRequestResult.CreateBondFailed)
+                                            ) {
+                                                showRingAlreadyPairedDialog = true
+                                            }
+                                        }
+                                        null -> {
                                             coreAnalytics.logEvent("ring.pair_failed", mapOf("reason" to "bonding_error"))
                                         }
                                     }
@@ -640,6 +759,12 @@ fun RingItem(ring: IndexDevice, scope: CoroutineScope) {
                             Text("Pair")
                         }
                     }
+                } else if (ring is InterviewedIndexDevice && ring.updating) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    )
                 }
             }
         },
@@ -649,7 +774,60 @@ fun RingItem(ring: IndexDevice, scope: CoroutineScope) {
             }
         },
     )
+
+    if (showRingAlreadyPairedDialog) {
+        val platform = koinInject<Platform>()
+        AlertDialog(
+            onDismissRequest = { showRingAlreadyPairedDialog = false },
+            title = {
+                if (platform.isIOS) {
+                    Text("Pairing issue detected")
+                } else {
+                    Text("Device already paired")
+                }
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Error,
+                    contentDescription = "Error",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(40.dp)
+                )
+            },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.Start,
+                ) {
+                    if (platform.isIOS) {
+                        Text("This device is having trouble pairing. Please follow the instructions below to recover it:")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("1. Go to Settings > Bluetooth")
+                        Text("2. Find e.g. 'Pebble Index ABC' in the list of devices")
+                        Text("3. If it's there, tap the info icon and choose \"Forget This Device\". If it's not there, continue.")
+                        Text("4. Reset the ring by pressing the button in an 'SOS' sequence as shown below.")
+                    } else {
+                        Text("This device is already paired to another phone.")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Please reset the ring by pressing the button in an 'SOS' sequence as shown below, then try pairing again.")
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    PressPatternDot(
+                        Press.SOS,
+                        size = 30.dp,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Text("You'll see the light flash red green blue repeatedly when successful.", modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp) )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRingAlreadyPairedDialog = false }) { Text("OK") }
+            },
+        )
+    }
 }
+
+@Composable
+expect fun RemovePairingMenuItem(ring: KnownIndexDevice, onShowRemoveDialog: () -> Unit, onHideMenu: () -> Unit)
 
 @Composable
 private fun RingMenu(ring: KnownIndexDevice) {
@@ -664,13 +842,13 @@ private fun RingMenu(ring: KnownIndexDevice) {
             expanded = showMenu,
             onDismissRequest = { showMenu = false },
         ) {
-            DropdownMenuItem(
-                text = { Text("Remove") },
-                leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                onClick = {
-                    showMenu = false
+            RemovePairingMenuItem(
+                ring = ring,
+                onShowRemoveDialog = {
                     showRemoveDialog = true
+                    showMenu = false
                 },
+                onHideMenu = { showMenu = false }
             )
         }
     }

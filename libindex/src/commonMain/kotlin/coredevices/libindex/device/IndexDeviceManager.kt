@@ -6,14 +6,16 @@ import coredevices.haversine.KMPHaversineSatelliteManager
 import coredevices.libindex.IndexDevices
 import coredevices.libindex.Rings
 import coredevices.libindex.database.BasePreferences
+import coredevices.libindex.database.PrefsCollectionIndexStorage
+import coredevices.libindex.database.repository.RingTransferRepository
 import coredevices.libindex.di.LibIndexCoroutineScope
-import io.rebble.libpebblecommon.connection.AppContext
-import io.rebble.libpebblecommon.connection.bt.ble.pebble.LEConstants.BOND_NONE
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.runningFold
@@ -21,12 +23,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
 
-class IndexDeviceRepository(
+class IndexDeviceManager(
     private val satelliteManager: KMPHaversineSatelliteManager,
     private val scope: LibIndexCoroutineScope,
     private val deviceFactory: IndexDeviceFactory,
     private val prefs: BasePreferences,
-    private val context: AppContext
+    // Not present on some platforms (iOS)
+    private val associations: IndexPlatformBluetoothAssociations?,
+    private val indexStorage: PrefsCollectionIndexStorage,
+    private val transferRepo: RingTransferRepository,
 ): Rings {
     private val _rings = MutableStateFlow(emptyList<IndexDevice>())
     override val rings: IndexDevices = _rings
@@ -48,11 +53,14 @@ class IndexDeviceRepository(
         }
     }
 
-    private fun updateRing(satellite: KMPHaversineSatellite) {
+    private fun updateRing(satellite: KMPHaversineSatellite, isUpdating: Boolean? = null) {
         _rings.update { prev ->
             val existingIdx = prev.indexOfFirst { satellite.id.equals(it.identifier.asString, ignoreCase = true) }
             val existing = if (existingIdx != -1) prev[existingIdx] as? KnownIndexDevice else null
             if (existingIdx != -1 && existing != null) {
+                if (prefs.ringPairedName.value != satellite.name) {
+                    prefs.setRingPairedName(satellite.name)
+                }
                 prev
                     .toMutableList()
                     .apply {
@@ -64,6 +72,8 @@ class IndexDeviceRepository(
                                 isPaired = true,
                                 satellite = satellite,
                                 satelliteState = satellite.state.value!!,
+                                isUpdating = isUpdating
+                                    ?: (existing is InterviewedIndexDevice && (existing as InterviewedIndexDevice).updating)
                             )
                         )
                     }
@@ -74,15 +84,34 @@ class IndexDeviceRepository(
     }
 
     fun init() {
-        prefs.ringPaired.filterNotNull().flatMapLatest {
-            getBluetoothDevicePairEvents(context, IndexIdentifier(it))
-        }.onEach {
-            logger.d { "Received bond state change for paired ring ${it.device.asString}, bondState=${it.bondState}, unbondReason=${it.unbondReason}" }
-            if (it.bondState == BOND_NONE) {
-                logger.d { "Paired ring ${it.device.asString} was unpaired, clearing paired state" }
+        prefs.ringPaired.value?.let { pairedId ->
+            val association = associations?.associations?.value?.firstOrNull { it.identifier == IndexIdentifier(pairedId) }
+            if (associations != null && association == null) {
+                logger.d { "Paired ring $pairedId not found in bt associations, clearing paired state" }
                 prefs.setRingPaired(null)
+                prefs.setRingPairedName(null)
+            } else if (association != null && association.deviceName != prefs.ringPairedName.value) {
+                prefs.setRingPairedName(association.deviceName)
             }
         }
+        associations?.bondStateChanges?.onEach { evt ->
+            if (evt.state == IndexBondState.NotBonded && evt.identifier.asString == prefs.ringPaired.value) {
+                logger.d { "Received bond state change for paired ring ${evt.identifier.asString}, state=${evt.state}, removing paired state" }
+                prefs.setRingPaired(null)
+                prefs.setRingPairedName(null)
+            } else if (evt.state == IndexBondState.Bonded && evt.identifier.asString == prefs.ringPaired.value) {
+                logger.d { "Received bond state change for paired ring ${evt.identifier.asString}, state=${evt.state}, ring likely SOS'd, considering it a new iteration" }
+                indexStorage.setLastSuccessfulCollectionIndex(null)
+                transferRepo.markTransfersAsPreviousIndexIteration()
+                evt.name?.let { prefs.setRingPairedName(it) }
+            } else if (evt.state == IndexBondState.Bonded && prefs.ringPaired.value == null && evt.name?.contains("Pebble Index", ignoreCase = true) == true) {
+                logger.d { "Received bond state change for unpaired ring ${evt.identifier.asString}, state=${evt.state}, setting as paired ring" }
+                indexStorage.setLastSuccessfulCollectionIndex(null)
+                transferRepo.markTransfersAsPreviousIndexIteration()
+                prefs.setRingPaired(evt.identifier.asString)
+                prefs.setRingPairedName(evt.name)
+            }
+        }?.flowOn(Dispatchers.IO)?.launchIn(scope)
         prefs.ringPaired
             .runningFold<String?, Pair<String?, String?>>(null to null) { (_, prev), new -> prev to new }
             .drop(1)
@@ -102,7 +131,7 @@ class IndexDeviceRepository(
                         val existing = prev.indexOfFirst { it.identifier.asString.equals(new, ignoreCase = true) }
                         val known = deviceFactory.create(
                             identifier = IndexIdentifier(new),
-                            name = "Index 01",
+                            name = prefs.ringPairedName.value ?: "Index 01",
                             isPaired = true,
                         )
                         if (existing != -1 && prev[existing] is DiscoveredIndexDevice) {
@@ -123,9 +152,13 @@ class IndexDeviceRepository(
                         it.state.filterNotNull().first()
                     } ?: return@onEach
 
-                    updateRing(it)
+                    updateRing(it, isUpdating = null)
                 }
             }.launchIn(scope)
+    }
+
+    fun markFirmwareUpdatingState(identifier: KMPHaversineSatellite, isUpdating: Boolean) {
+        updateRing(identifier, isUpdating)
     }
 
     fun addScanResult(result: IndexScanResult) {

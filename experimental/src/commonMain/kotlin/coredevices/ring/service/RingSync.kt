@@ -14,6 +14,7 @@ import coredevices.libindex.database.entity.RingTransferStatus
 import coredevices.ring.data.entity.room.TraceEventData
 import coredevices.ring.database.Preferences
 import coredevices.libindex.database.repository.RingTransferRepository
+import coredevices.libindex.device.IndexDeviceManager
 import coredevices.ring.service.recordings.RecordingProcessingQueue
 import coredevices.ring.storage.RecordingStorage
 import coredevices.ring.util.trace.RingTraceSession
@@ -119,6 +120,7 @@ class RingSync(
     private val usersDao: UsersDao,
     private val scope: RecordingBackgroundScope,
     private val trace: RingTraceSession,
+    private val deviceManager: IndexDeviceManager
 ): KoinComponent {
     companion object {
         private val logger = Logger.withTag("RingSync")
@@ -232,12 +234,14 @@ class RingSync(
                                             }
                                             try {
                                                 var id: String? = null
+                                                val satelliteSerial = transferStatus.satellite.state.value?.programmedSerialNumber ?: transferStatus.satellite.state.value?.serialNumber
+                                                ?: transferStatus.satellite.id
                                                 when (transferStatus) {
                                                     is TransferStatus.TransferStarted -> {
                                                         logger.i { "Transfer started for ${transferStatus.satellite.id}: serial ${transferStatus.satellite.state.value?.programmedSerialNumber}" }
                                                         trace.markEvent("transfer_started",
                                                             TraceEventData.TransferStarted(
-                                                                transferStatus.satellite.id,
+                                                                satelliteSerial,
                                                                 transferStatus.rollover
                                                             )
                                                         )
@@ -269,7 +273,7 @@ class RingSync(
                                                     is TransferStatus.TransferTypeDetermined -> {
                                                         trace.markEvent("transfer_type_determined",
                                                             TraceEventData.TransferTypeDetermined(
-                                                                satellite = transferStatus.satellite.id,
+                                                                satellite = satelliteSerial,
                                                                 isAudio = transferStatus.isAudio,
                                                                 buttonSequence = transferStatus.buttonSequence,
                                                                 collectionStartIndex = transferStatus.collectionStartIndex,
@@ -316,7 +320,7 @@ class RingSync(
                                                                     if (transfer.status == RingTransferStatus.Started) {
                                                                         trace.markEvent("past_transfer_failed",
                                                                             TraceEventData.PastTransferFailed(
-                                                                                satellite = transferStatus.satellite.id,
+                                                                                satellite = satelliteSerial,
                                                                                 transferId = transfer.id
                                                                             )
                                                                         )
@@ -352,7 +356,7 @@ class RingSync(
                                                         transferRange = null
                                                         trace.markEvent("transfer_dropped_recoverable",
                                                             TraceEventData.TransferDroppedRecoverable(
-                                                                satellite = transferStatus.satellite.id,
+                                                                satellite = satelliteSerial,
                                                                 collectionIndex = transferStatus.collectionIndex,
                                                             )
                                                         )
@@ -390,7 +394,7 @@ class RingSync(
                                                         }
                                                         trace.markEvent("transfer_dropped_unrecoverable",
                                                             TraceEventData.TransferDroppedUnrecoverable(
-                                                                satellite = transferStatus.satellite.id,
+                                                                satellite = satelliteSerial,
                                                                 transferId = tid,
                                                                 indices = transferStatus.collection?.indices?.toList()
                                                             )
@@ -606,6 +610,7 @@ class RingSync(
                                                     logger.i {
                                                         "Satellite ${satelliteStatus.satellite.id} started firmware update to version ${satelliteStatus.newVersion} isFailsafe = $isFailsafe"
                                                     }
+                                                    deviceManager.markFirmwareUpdatingState(satelliteStatus.satellite, isUpdating = true)
                                                     if (isFailsafe && transferRange != null) {
                                                         logger.e {
                                                             "Satellite is in failsafe mode but we have an active transfer range, transfer might be interrupted. Marking current transfer as failed and clearing transfer range."
@@ -637,6 +642,7 @@ class RingSync(
                                                     logger.i {
                                                         "Satellite ${satelliteStatus.satellite.id} firmware update to version ${satelliteStatus.newVersion} succeeded"
                                                     }
+                                                    deviceManager.markFirmwareUpdatingState(satelliteStatus.satellite, isUpdating = false)
                                                     _ringEvents.emit(
                                                         RingEvent.FirmwareUpdate.Success(
                                                             ringId = satelliteStatus.satellite.id,
@@ -650,6 +656,7 @@ class RingSync(
                                                     logger.e {
                                                         "Satellite ${satelliteStatus.satellite.id} firmware update to version ${satelliteStatus.newVersion} failed"
                                                     }
+                                                    deviceManager.markFirmwareUpdatingState(satelliteStatus.satellite, isUpdating = false)
                                                     _ringEvents.emit(
                                                         RingEvent.FirmwareUpdate.Failed(
                                                             ringId = satelliteStatus.satellite.id,
