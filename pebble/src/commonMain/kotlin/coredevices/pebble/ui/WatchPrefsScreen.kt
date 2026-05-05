@@ -1,5 +1,8 @@
 package coredevices.pebble.ui
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -7,7 +10,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coredevices.pebble.rememberLibPebble
 import coredevices.ui.ConfirmDialog
 import io.rebble.libpebblecommon.SystemAppIDs.AIRPLANE_MODE_UUID
@@ -25,6 +30,7 @@ import io.rebble.libpebblecommon.database.entity.EnumWatchPref
 import io.rebble.libpebblecommon.database.entity.NumberWatchPref
 import io.rebble.libpebblecommon.database.entity.QuickLaunchSetting
 import io.rebble.libpebblecommon.database.entity.QuicklaunchWatchPref
+import io.rebble.libpebblecommon.database.entity.RgbColorWatchPref
 import io.rebble.libpebblecommon.database.entity.WatchPref
 import io.rebble.libpebblecommon.database.entity.WatchPrefEnum
 import io.rebble.libpebblecommon.locker.AppType
@@ -44,6 +50,7 @@ fun watchPrefs(): List<SettingsItem> {
                 is EnumWatchPref -> enumPref(pref.castParent(item), libPebble)
                 is QuicklaunchWatchPref -> quicklaunchPref(pref.castParent(item), libPebble, quickLaunchOptions)
                 is ColorWatchPref -> colorPref(pref.castParent(item), libPebble)
+                is RgbColorWatchPref -> rgbColorPref(pref.castParent(item), libPebble)
                 is NumberWatchPref -> numberPref(pref.castParent(item), libPebble)
             }
         }
@@ -90,12 +97,16 @@ fun WatchPref<*>.section(): Section = when (this) {
 //    ColorWatchPref.AppMenuHighlightColor -> Section.Display
     EnumWatchPref.TextSize -> Section.Notifications
     EnumWatchPref.MotionSensitivity -> Section.Display
+    EnumWatchPref.BacklightIntensity -> Section.Display
+    EnumWatchPref.BacklightTouch -> Section.Display
+    RgbColorWatchPref.BacklightColor -> Section.Display
     NumberWatchPref.BacklightTimeoutMs -> Section.Display
     NumberWatchPref.AmbientLightThreshold -> Section.Display
     NumberWatchPref.DynamicBacklightMinThreshold -> Section.Display
     QuicklaunchWatchPref.QlUp -> Section.QuickLaunch
     QuicklaunchWatchPref.QlDown -> Section.QuickLaunch
     QuicklaunchWatchPref.QlComboBackUp -> Section.QuickLaunch
+    QuicklaunchWatchPref.QlComboUpDown -> Section.QuickLaunch
     QuicklaunchWatchPref.QlSelect -> Section.QuickLaunch
     QuicklaunchWatchPref.QlBack -> Section.QuickLaunch
     QuicklaunchWatchPref.QlSingleClickUp -> Section.QuickLaunch
@@ -127,6 +138,7 @@ private fun numberPref(item: WatchPreference<Long>, libPebble: LibPebble): Setti
     return basicSettingsNumberItem(
         id = pref.id,
         title = pref.displayName,
+        description = pref.description,
         topLevelType = TopLevelType.Watch,
         section = pref.section(),
         value = item.valueOrDefault(),
@@ -155,14 +167,19 @@ private fun colorPref(item: WatchPreference<TimelineColor>, libPebble: LibPebble
                     Text(pref.displayName)
                 },
                 supportingContent = {
-                    SelectColorOrNone(
-                        currentColorName = default.identifier,
-                        onChangeColor = { color ->
-                            libPebble.setWatchPref(item.copy(value = color))
-                        },
-                        availableColors = pref.availableColors,
-                        defaultToListTab = true,
-                    )
+                    Column {
+                        pref.description?.let { description ->
+                            Text(description, fontSize = 11.sp)
+                        }
+                        SelectColorOrNone(
+                            currentColorName = default.identifier,
+                            onChangeColor = { color ->
+                                libPebble.setWatchPref(item.copy(value = color))
+                            },
+                            availableColors = pref.availableColors,
+                            defaultToListTab = true,
+                        )
+                    }
                 },
                 shadowElevation = 2.dp,
             )
@@ -175,6 +192,7 @@ private fun booleanPref(item: WatchPreference<Boolean>, libPebble: LibPebble): S
     return basicSettingsToggleItem(
         id = item.pref.id,
         title = item.pref.displayName,
+        description = item.pref.description,
         topLevelType = TopLevelType.Watch,
         section = item.pref.section(),
         checked = item.valueOrDefault(),
@@ -190,6 +208,7 @@ private fun enumPref(item: WatchPreference<WatchPrefEnum>, libPebble: LibPebble)
     return basicSettingsDropdownItem(
         id = pref.id,
         title = pref.displayName,
+        description = pref.description,
         topLevelType = TopLevelType.Watch,
         section = pref.section(),
         selectedItem = item.valueOrDefault(),
@@ -198,6 +217,37 @@ private fun enumPref(item: WatchPreference<WatchPrefEnum>, libPebble: LibPebble)
             libPebble.setWatchPref(item.copy(value = it))
         },
         itemText = { it.displayName },
+        isDebugSetting = pref.isDebugSetting,
+    )
+}
+
+private fun rgbColorPref(item: WatchPreference<UInt>, libPebble: LibPebble): SettingsItem {
+    val pref = item.pref as RgbColorWatchPref
+    return SettingsItem(
+        id = pref.id,
+        title = pref.displayName,
+        topLevelType = TopLevelType.Watch,
+        section = pref.section(),
+        item = {
+            ListItem(
+                headlineContent = { Text(pref.displayName) },
+                supportingContent = {
+                    Column {
+                        pref.description?.let { description ->
+                            Text(description, fontSize = 11.sp)
+                        }
+                        SelectRgbColor(
+                            currentRgb = item.valueOrDefault(),
+                            defaultRgb = pref.defaultValue,
+                            presets = pref.presets,
+                            onChangeColor = { rgb ->
+                                libPebble.setWatchPref(item.copy(value = rgb))
+                            },
+                        )
+                    }
+                },
+            )
+        },
         isDebugSetting = pref.isDebugSetting,
     )
 }
@@ -238,6 +288,7 @@ private fun quicklaunchPref(item: WatchPreference<QuickLaunchSetting>, libPebble
     return basicSettingsDropdownItem(
         id = item.pref.id,
         title = item.pref.displayName,
+        description = item.pref.description,
         topLevelType = TopLevelType.Watch,
         section = item.pref.section(),
         selectedItem = defaultQl,

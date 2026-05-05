@@ -188,6 +188,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.io.buffered
@@ -210,18 +211,31 @@ expect fun getIPAddress(): Pair<String?, String?>
 
 private val logger = Logger.withTag("WatchesScreen")
 
+sealed interface ScanningStatus {
+    object NotScanning : ScanningStatus
+    sealed interface ScanningWatch : ScanningStatus
+    object ScanningWatchClassic : ScanningWatch
+    object ScanningWatchBle : ScanningWatch
+    object ScanningRing : ScanningStatus
+}
+
 @Composable
 fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
     val libPebble = rememberLibPebble()
     val libIndex = koinInject<LibIndex>()
     val pebbleFeatures = koinInject<PebbleFeatures>()
-    val isScanning by combine(
+    val scanningStatus by combine(
         libPebble.isScanningBle,
         libPebble.isScanningClassic,
         libIndex.isScanning,
     ) { scanningBle, scanningClassic, scanningIndex ->
-        scanningBle || scanningClassic || scanningIndex
-    }.collectAsState(false)
+        when {
+            scanningBle -> ScanningStatus.ScanningWatchBle
+            scanningClassic -> ScanningStatus.ScanningWatchClassic
+            scanningIndex -> ScanningStatus.ScanningRing
+            else -> ScanningStatus.NotScanning
+        }
+    }.collectAsState(ScanningStatus.NotScanning)
     val scope = rememberCoroutineScope()
     val permissionRequester: PermissionRequester = koinInject()
     val requiredScanPermission = remember { scanPermission() }
@@ -231,6 +245,14 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
         .collectAsState(initial = false)
     var showIndexAlreadyPairedDialog by remember { mutableStateOf(false) }
     var fabInfoDialog by remember { mutableStateOf<FabInfo?>(null) }
+    var showRingWakeHint by remember { mutableStateOf(false) }
+    LaunchedEffect(scanningStatus) {
+        showRingWakeHint = false
+        if (scanningStatus == ScanningStatus.ScanningRing) {
+            delay(15_000)
+            showRingWakeHint = true
+        }
+    }
 
     suspend fun ensureScanPermission(uiContext: PlatformUiContext): Boolean {
         if (requiredScanPermission != null && permissionRequester.missingPermissions.value.contains(
@@ -275,7 +297,7 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                 ) {
                     Icon(Icons.Filled.BluetoothDisabled, "Bluetooth is disabled")
                 }
-            } else if (isScanning) {
+            } else if (scanningStatus != ScanningStatus.NotScanning) {
                 FloatingActionButton(
                     onClick = {
                         libPebble.stopBleScan()
@@ -395,6 +417,7 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                     PebbleDeviceComparator
                 )
             )
+            val rings by libIndex.rings.collectAsState()
             val entriesFlow = remember {
                 combine(watchesFlow, libIndex.rings) { sortedWatches, rings ->
                     rings.map { DeviceListEntry.Ring(it) } +
@@ -458,7 +481,7 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                         )
                     }
                 }
-                if (isScanning) {
+                if (scanningStatus != ScanningStatus.NotScanning) {
                     Text(
                         text = "Scanning for devices...",
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(5.dp)
@@ -466,25 +489,43 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(5.dp)
                     )
-                    ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        elevation = CardDefaults.cardElevation(
-                            defaultElevation = 6.dp
-                        ),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Text(
-                            text = "Remember to unpair any other phones from your watch before connecting (Settings/Bluetooth)",
-                            modifier = Modifier.padding(15.dp).align(Alignment.CenterHorizontally),
-                            textAlign = TextAlign.Center,
-                        )
+                    if (scanningStatus != ScanningStatus.ScanningRing) {
+                        ElevatedCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = 6.dp
+                            ),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                text = "Remember to unpair any other phones from your watch before connecting (Settings/Bluetooth)",
+                                modifier = Modifier.padding(15.dp).align(Alignment.CenterHorizontally),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                    if (scanningStatus == ScanningStatus.ScanningRing && showRingWakeHint && rings.isEmpty()) {
+                        ElevatedCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = 6.dp
+                            )
+                        ) {
+                            Text(
+                                text = "Can't find your Index 01? Press the button on the ring to wake it up.",
+                                modifier = Modifier.padding(15.dp).align(Alignment.CenterHorizontally),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 } else {
-                    if (watches.isEmpty()) {
+                    if (watches.isEmpty() && rings.isEmpty()) {
                         if (!pebbleFeatures.supportsDetectingOtherPebbleApps()) {
                             Card(
                                 modifier = Modifier
@@ -634,6 +675,9 @@ fun WatchesPreview() {
                                 override val firmwareVersion = "1.0.0"
                                 override val serialNumber = "SN12345678"
                                 override val updating: Boolean = false
+                                override fun remove() {
+                                    TODO("Not yet implemented")
+                                }
                             }
                         )
                     )
@@ -1002,10 +1046,6 @@ fun PebbleDevice.stateText(
         is FirmwareUpdater.FirmwareUpdateStatus.WaitingForReboot -> " - Rebooting watch to finish update to ${firmwareUpdateState.update.version.stringVersion}"
         is FirmwareUpdater.FirmwareUpdateStatus.WaitingToStart -> " - Updating to PebbleOS ${firmwareUpdateState.update.version.stringVersion}"
     }
-    val btClassicText = when {
-        this is ActiveDevice && usingBtClassic -> " (BT Classic)"
-        else -> ""
-    }
     val stateText = when (this) {
         is ConnectedPebbleDevice -> "Connected$installingState"
         is ConnectedPebbleDeviceInRecovery -> "Connected (Factory)$installingState"
@@ -1026,7 +1066,7 @@ fun PebbleDevice.stateText(
         is DisconnectingPebbleDevice -> "Disconnecting"
         else -> "Unknown ($this)"
     }
-    return "$stateText$btClassicText"
+    return stateText
 }
 
 private fun PebbleDevice.isActive(): Boolean = when (this) {
@@ -1035,6 +1075,8 @@ private fun PebbleDevice.isActive(): Boolean = when (this) {
 }
 
 expect fun postTestNotification(appContext: AppContext)
+
+expect fun openSystemBluetoothSettings(appContext: AppContext)
 
 expect fun ImageBitmap.toPngBytes(): ByteArray
 
@@ -1801,6 +1843,8 @@ fun WatchDetails(
     allowedToConnect: Boolean,
     navBarNav: NavBarNav,
 ) {
+    val appContext: AppContext = koinInject()
+    val pebbleFeatures = koinInject<PebbleFeatures>()
     val firmwareUpdateState = remember(watch) {
         if (watch is ConnectedPebble.Firmware) {
             watch.firmwareUpdateState
@@ -1942,26 +1986,26 @@ fun WatchDetails(
             )
         }
     }
-    if (watch !is CommonConnectedDevice && watch.connectionFailureInfo?.reason == ConnectionFailureReason.CreateBondFailed) {
-        var showPairingErrorDialog by remember { mutableStateOf(false) }
-        if (showPairingErrorDialog) {
-            AlertDialog(
-                onDismissRequest = { showPairingErrorDialog = false },
-                title = { Text("Error Pairing") },
-                text = { Text("Please go to system bluetooth settings, and unpair this device") },
-                confirmButton = {
-                    TextButton(onClick = { showPairingErrorDialog = false }) { Text("OK") }
-                }
-            )
-        }
-        PebbleElevatedButton(
-            text = "Error Pairing",
-            icon = Icons.Default.Error,
-            onClick = {
-                showPairingErrorDialog = true
-            },
-            primaryColor = true,
-            modifier = Modifier.padding(vertical = 5.dp),
+    val failureInfo = watch.connectionFailureInfo
+    if (watch !is CommonConnectedDevice && failureInfo?.reason == ConnectionFailureReason.CreateBondFailed) {
+        ConnectionFailureGuidanceButton(
+            appContext = appContext,
+            pebbleFeatures = pebbleFeatures,
+            buttonText = "Error Pairing",
+            dialogTitle = "Error Pairing",
+            dialogText = "Please go to system bluetooth settings, and unpair this device.",
+        )
+    }
+    if (watch !is CommonConnectedDevice && failureInfo?.reason == ConnectionFailureReason.ClassicConnectionFailed && failureInfo.times >= 5) {
+        ConnectionFailureGuidanceButton(
+            appContext = appContext,
+            pebbleFeatures = pebbleFeatures,
+            buttonText = "Connection failing",
+            dialogTitle = "Can't connect to watch",
+            dialogText = "Make sure your watch is powered on and nearby. " +
+                    "If it still won't connect, open Bluetooth settings, " +
+                    "remove (\"Forget\") this watch, and also unpair the phone " +
+                    "in watch settings (Settings > Bluetooth), then accept the new pairing request.",
         )
     }
     Row {
@@ -1994,6 +2038,45 @@ fun WatchDetails(
         }
         WatchMenu(watch, navBarNav)
     }
+}
+
+@Composable
+private fun ConnectionFailureGuidanceButton(
+    appContext: AppContext,
+    pebbleFeatures: PebbleFeatures,
+    buttonText: String,
+    dialogTitle: String,
+    dialogText: String,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    val canDeepLink = pebbleFeatures.supportsLinkingToOsBtSettings()
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(dialogTitle) },
+            text = { Text(dialogText) },
+            confirmButton = {
+                if (canDeepLink) {
+                    TextButton(onClick = {
+                        openSystemBluetoothSettings(appContext)
+                        showDialog = false
+                    }) { Text("Open Bluetooth settings") }
+                } else {
+                    TextButton(onClick = { showDialog = false }) { Text("OK") }
+                }
+            },
+            dismissButton = if (canDeepLink) {
+                { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
+            } else null,
+        )
+    }
+    PebbleElevatedButton(
+        text = buttonText,
+        icon = Icons.Default.Error,
+        onClick = { showDialog = true },
+        primaryColor = true,
+        modifier = Modifier.padding(vertical = 5.dp),
+    )
 }
 
 fun Int.batteryIcon() = when {

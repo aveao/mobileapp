@@ -176,6 +176,8 @@ private fun fakePebbleModule(appContext: AppContext) = module {
     val storeCollectionDao = object : AppstoreCollectionDao {
         override suspend fun insertOrUpdateCollection(collection: AppstoreCollection): Long = 1
 
+        override suspend fun insertCollectionIfMissing(collection: AppstoreCollection): Long = 1
+
         override suspend fun getCollection(
             sourceId: Int,
             slug: String,
@@ -193,6 +195,7 @@ private fun fakePebbleModule(appContext: AppContext) = module {
     single { storeCollectionDao } bind AppstoreCollectionDao::class
     val usersDao = object : UsersDao {
         override val user: Flow<PebbleUser?> = flow { emit(null) }
+        override val loginEvents: Flow<PebbleUser> = flow {}
         override suspend fun updateNotionToken(notionToken: String?) {}
         override suspend fun updateMcpRunToken(mcpRunToken: String?) {}
         override suspend fun updateTodoBlockId(todoBlockId: String) {}
@@ -252,6 +255,8 @@ private fun fakePebbleModule(appContext: AppContext) = module {
         ): Boolean = true
 
         override suspend fun removeFromLegacyLocker(id: Uuid): Boolean = true
+        override suspend fun fetchUserHearts() {
+        }
 
         override suspend fun getWeather(
             latitude: Double,
