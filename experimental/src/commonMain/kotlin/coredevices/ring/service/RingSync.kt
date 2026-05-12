@@ -526,7 +526,11 @@ class RingSync(
                                                             buttonReleased = buttonReleaseTimestamp?.toEpochMilliseconds(),
                                                             transferCompleted = transferCompleteTimestamp.toEpochMilliseconds(),
                                                             buttonReleaseAdvertisementLatencyMs = buttonReleaseTimestamp
-                                                                ?.let { transfer.transferInfo!!.advertisementReceived - it.toEpochMilliseconds() },
+                                                                ?.let { brt ->
+                                                                    transfer.transferInfo!!.advertisementReceived?.let { ar ->
+                                                                        ar - brt.toEpochMilliseconds()
+                                                                    }
+                                                                },
                                                         )
                                                         withContext(Dispatchers.IO) {
                                                             ringTransferRepository.updateTransferInfo(
@@ -711,7 +715,8 @@ class RingSync(
             appendLine()
             appendLine("Ring Summary")
             appendLine("ID: ${it.id}")
-            appendLine("Serial: ${state?.programmedSerialNumber ?: state?.serialNumber} (is programmed: ${state?.programmedSerialNumber != null})")
+            appendLine("MAC: ${state?.serialNumber}")
+            appendLine("Serial: ${state?.programmedSerialNumber}")
             appendLine("Name: ${it.name}")
             appendLine("Last Seen: ${it.lastAdvertisement?.timestamp}")
             appendLine("Last RSSI: ${it.lastAdvertisement?.rssi}")

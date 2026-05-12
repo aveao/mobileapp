@@ -6,19 +6,19 @@ import android.content.pm.PackageManager
 import co.touchlab.kermit.Logger
 import com.russhwolf.settings.Settings
 import coredevices.HackyPermissionRequesterProvider
+import coredevices.ring.database.firestore.FirestoreKnownRingsSync
 import coredevices.ring.database.firestore.dao.FirestoreRecordingsDao
 import coredevices.ring.glance.VoiceWidgetReceiver
-import coredevices.ring.service.RingBackgroundManager
 import coredevices.util.CoreConfigHolder
 import coredevices.util.Permission
 
 actual class RingDelegate(
     private val context: Context,
-    private val ringBackgroundManager: RingBackgroundManager,
     private val permissionRequester: HackyPermissionRequesterProvider,
     private val coreConfigHolder: CoreConfigHolder,
     private val recordingsDao: FirestoreRecordingsDao,
-    private val settings: Settings
+    private val settings: Settings,
+    private val firestoreKnownRingsSync: FirestoreKnownRingsSync,
 ) {
     private val logger = Logger.withTag("RingDelegate")
 
@@ -40,7 +40,7 @@ actual class RingDelegate(
      */
     actual suspend fun init() {
         listenForUserPresent(recordingsDao, coreConfigHolder, settings)
-        ringBackgroundManager.monitorToStartBackground()
+        firestoreKnownRingsSync.init()
         //enableWidget(context)
     }
 }

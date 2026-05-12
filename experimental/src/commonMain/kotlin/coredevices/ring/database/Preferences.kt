@@ -30,6 +30,14 @@ interface Preferences: BasePreferences {
     val backupEnabled: StateFlow<Boolean>
     val useEncryption: StateFlow<Boolean>
     val encryptionKeyFingerprint: StateFlow<String?>
+    val lastWipedRing: StateFlow<String?>
+    /** Cached count of recordings in cloud, captured at the end of every
+     *  manual sync. The Settings → Backup dialog reads this instead of
+     *  paginating the whole `recordings/{uid}/recordings` collection on
+     *  open — that approach was downloading every full document body
+     *  just to count them, which on a 1300+ recording user took a
+     *  minute+ over mobile data. `null` = never synced on this device. */
+    val lastBackupCount: StateFlow<Int?>
 
     suspend fun setUseCactusAgent(useCactus: Boolean)
     suspend fun setUseCactusTranscription(useCactus: Boolean)
@@ -44,6 +52,8 @@ interface Preferences: BasePreferences {
     fun setBackupEnabled(enabled: Boolean)
     fun setUseEncryption(enabled: Boolean)
     fun setEncryptionKeyFingerprint(fingerprint: String?)
+    fun setLastWipedRing(id: String?)
+    fun setLastBackupCount(count: Int?)
 }
 
 class PreferencesImpl(private val settings: Settings): Preferences {
@@ -122,6 +132,12 @@ class PreferencesImpl(private val settings: Settings): Preferences {
     override val useEncryption = _useEncryption.asStateFlow()
     private val _encryptionKeyFingerprint = MutableStateFlow(settings.getStringOrNull("encryption_key_fingerprint"))
     override val encryptionKeyFingerprint = _encryptionKeyFingerprint.asStateFlow()
+    private val _lastWipedRing = MutableStateFlow(settings.getStringOrNull("last_wiped_ring"))
+    override val lastWipedRing = _lastWipedRing.asStateFlow()
+    private val _lastBackupCount = MutableStateFlow(
+        if (settings.hasKey("last_backup_count")) settings.getInt("last_backup_count", 0) else null
+    )
+    override val lastBackupCount = _lastBackupCount.asStateFlow()
 
     override suspend fun setUseCactusAgent(useCactus: Boolean) {
         withContext(Dispatchers.IO) {
@@ -226,6 +242,24 @@ class PreferencesImpl(private val settings: Settings): Preferences {
             settings.remove("encryption_key_fingerprint")
         }
         _encryptionKeyFingerprint.value = fingerprint
+    }
+
+    override fun setLastWipedRing(id: String?) {
+        if (id != null) {
+            settings.putString("last_wiped_ring", id)
+        } else {
+            settings.remove("last_wiped_ring")
+        }
+        _lastWipedRing.value = id
+    }
+
+    override fun setLastBackupCount(count: Int?) {
+        if (count != null) {
+            settings.putInt("last_backup_count", count)
+        } else {
+            settings.remove("last_backup_count")
+        }
+        _lastBackupCount.value = count
     }
 }
 

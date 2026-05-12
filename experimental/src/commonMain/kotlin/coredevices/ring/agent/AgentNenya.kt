@@ -8,8 +8,12 @@ import coredevices.mcp.client.McpSession
 import coredevices.mcp.data.SemanticResult
 import coredevices.ring.api.NenyaClient
 import coredevices.mcp.data.ToolCallResult
+import coredevices.ring.database.room.repository.ItemRepository
+import coredevices.ring.service.indexfeed.ItemFactory
+import coredevices.ring.service.indexfeed.RecordingSessionContext
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
@@ -32,6 +36,8 @@ import org.koin.core.component.KoinComponent
  */
 class AgentNenya(
     private val nenyaClient: NenyaClient,
+    private val itemFactory: ItemFactory,
+    private val itemRepository: ItemRepository,
     conversation: List<ConversationMessageDocument>,
     private val useSearchMode: Boolean = false
 ): KoinComponent, Agent {
@@ -48,11 +54,10 @@ class AgentNenya(
 You are an assistant primarily designed to help users create and manage notes and reminders. You can
 help with a multitude of tasks in addition to this too.
 Create a note with the user's input unless they specify a different action, do not assume an action that wasn't explicitly requested, just make a note.
-Eagerly run tools to assist the user, including running multiple tools in succession to achieve an overall goal.
+Eagerly run tools to assist the user by gathering required information and taking actions.
+Avoid additional commentary after taking a final action unless the user asked for it, e.g. when asking a question. The user can see actions without you notifying them.
 Avoid asking follow-up questions unless necessary.
 Always lean towards creating a note, for example if the user doesn't ask for a timer don't create a timer, even if the request has a duration in it.
-Use a single tool at a time, and wait for the result before deciding what to do next.
-Only take one action from a user request, for example don't create multiple reminders if the user only asked for one.
 """
         private const val MAX_TOOL_ITERATIONS = 3
     }
@@ -70,7 +75,7 @@ Only take one action from a user request, for example don't create multiple remi
         val tools = mcpSession.listTools()
         val toolDeclarations = tools.mapNotNull {
             val definition = it.tool.definition
-            val compositeName = "${it.integrationName}.${definition.name}"
+            val compositeName = "${it.integrationName}__${definition.name}"
             try {
                 ToolDeclaration(
                     function = FunctionDeclaration(
@@ -132,7 +137,7 @@ Only take one action from a user request, for example don't create multiple remi
                     logger.w { "Failed to deserialize tool call arguments for tool ${it.function!!.name}" }
                     emptyMap()
                 }
-                val compositeName = it.function!!.name.split(".", limit = 2)
+                val compositeName = it.function!!.name.split("__", limit = 2)
                 if (compositeName.size != 2) {
                     throw Exception("Invalid tool name: ${it.function!!.name}")
                 }
@@ -215,6 +220,20 @@ Only take one action from a user request, for example don't create multiple remi
                 semantic_result = SemanticResult.SupportingData(text ?: "No results", assistiveOnly = false)
             )
         )
+
+        currentCoroutineContext()[RecordingSessionContext]?.let { ctx ->
+            runCatching {
+                itemRepository.setItem(
+                    itemFactory.simpleUid(),
+                    itemFactory.answerItem(
+                        sourceRecordingId = ctx.sourceRecordingId,
+                        createdAt = ctx.createdAt,
+                        question = input,
+                        answer = text ?: "No results"
+                    )
+                )
+            }
+        }
     }
 
     override suspend fun send(

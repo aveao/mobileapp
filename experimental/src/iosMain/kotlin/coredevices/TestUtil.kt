@@ -146,6 +146,10 @@ private object PreferencesTestImpl: Preferences {
         get() = MutableStateFlow(false)
     override val encryptionKeyFingerprint: StateFlow<String?>
         get() = MutableStateFlow(null)
+    override val lastWipedRing: StateFlow<String?>
+        get() = MutableStateFlow(null)
+    override val lastBackupCount: StateFlow<Int?>
+        get() = MutableStateFlow(null)
 
     override suspend fun setUseCactusAgent(useCactus: Boolean) {
         TODO("Not yet implemented")
@@ -202,6 +206,8 @@ private object PreferencesTestImpl: Preferences {
     override fun setBackupEnabled(enabled: Boolean) {}
     override fun setUseEncryption(enabled: Boolean) {}
     override fun setEncryptionKeyFingerprint(fingerprint: String?) {}
+    override fun setLastWipedRing(id: String?) {}
+    override fun setLastBackupCount(count: Int?) {}
 }
 
 private object UsersDaoTestImpl: UsersDao {

@@ -4,6 +4,7 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import coredevices.haversine.CollectionIndexStorage
 import coredevices.haversine.KMPHaversineDebugDelegate
+import coredevices.haversine.KMPHaversineHacksDelegate
 import coredevices.indexai.agent.ServletRepository
 import coredevices.libindex.database.BasePreferences
 import coredevices.libindex.di.libIndexModule
@@ -32,7 +33,12 @@ import coredevices.ring.database.PreferencesImpl
 import coredevices.ring.database.room.RingDatabase
 import coredevices.ring.database.room.repository.McpSandboxRepository
 import coredevices.ring.database.room.repository.RecordingProcessingTaskRepository
+import coredevices.ring.database.room.repository.ItemRepository
+import coredevices.ring.database.room.repository.ListRepository
 import coredevices.ring.database.room.repository.RecordingRepository
+import coredevices.ring.service.indexfeed.DefaultListsBootstrap
+import coredevices.ring.service.indexfeed.IndexFeedSyncService
+import coredevices.ring.service.indexfeed.ItemFactory
 import coredevices.libindex.database.repository.RingTransferRepository
 import coredevices.ring.external.indexwebhook.IndexWebhookApi
 import coredevices.ring.external.indexwebhook.IndexWebhookApiImpl
@@ -45,7 +51,6 @@ import coredevices.ring.service.IndexButtonSequenceRecorder
 import coredevices.ring.service.IndexNotificationManager
 import coredevices.libindex.database.PrefsCollectionIndexStorage
 import coredevices.ring.service.RecordingBackgroundScope
-import coredevices.ring.service.RingBackgroundManager
 import coredevices.ring.service.RingPairing
 import coredevices.ring.service.RingSync
 import coredevices.ring.service.recordings.RecordingPreprocessor
@@ -53,6 +58,7 @@ import coredevices.ring.service.recordings.RecordingProcessingQueue
 import coredevices.ring.service.recordings.RecordingProcessor
 import coredevices.ring.service.recordings.button.RecordingOperationFactory
 import coredevices.ring.encryption.DocumentEncryptor
+import coredevices.ring.service.RingHacksDelegate
 import coredevices.ring.storage.RecordingStorage
 import coredevices.ring.util.trace.RingTraceSession
 import coredevices.ring.util.trace.TraceSessionExporter
@@ -132,11 +138,22 @@ val experimentalModule = module {
     single {
         get<RingDatabase>().traceEntryDao()
     }
+    single {
+        get<RingDatabase>().cachedItemDao()
+    }
+    single {
+        get<RingDatabase>().cachedListDao()
+    }
     singleOf(::RecordingRepository)
     single {
         RingTransferRepository(get(), get<RingDatabase>())
     }
     singleOf(::RecordingProcessingTaskRepository)
+    singleOf(::ItemRepository)
+    singleOf(::ListRepository)
+    singleOf(::DefaultListsBootstrap)
+    singleOf(::IndexFeedSyncService)
+    singleOf(::ItemFactory)
     singleOf(::PreferencesImpl) binds arrayOf(Preferences::class, BasePreferences::class)
     singleOf(::RingTraceSession)
     singleOf(::TraceSessionExporter)
@@ -173,13 +190,12 @@ val experimentalModule = module {
     singleOf(::DocumentEncryptor)
     singleOf(::RecordingPreprocessor)
     singleOf(::RingSync)
-    singleOf(::RingBackgroundManager)
     singleOf(::IndexNotificationManager)
     singleOf(::RingPairing)
     singleOf(::ExperimentalDevices)
     singleOf(::PrefsCollectionIndexStorage) bind CollectionIndexStorage::class
     factory { HackyPermissionRequesterProvider { get<PermissionRequester>() } }
-    factory { p -> AgentNenya(get(), p.getOrNull() ?: emptyList(), p.getOrNull() ?: false) }
+    factory { p -> AgentNenya(get(), get(), get(), p.getOrNull() ?: emptyList(), p.getOrNull() ?: false) }
     single { CactusModelProvider() }
     single<CactusModelPathProvider> { get<CactusModelProvider>() }
     factory { p -> AgentCactus(get<CactusModelProvider>(), p.getOrNull() ?: emptyList(), getOrNull<InferenceBoostProvider>() ?: NoOpInferenceBoostProvider()) }
@@ -188,6 +204,7 @@ val experimentalModule = module {
     singleOf(::IndexButtonActionHandler)
     singleOf(::IndexButtonSequenceRecorder)
     singleOf(::FirestoreRingDebugDelegate) bind KMPHaversineDebugDelegate::class
+    singleOf(::RingHacksDelegate) bind KMPHaversineHacksDelegate::class
     singleOf(::McpSandboxRepository)
     singleOf(::BuiltinServletRepository) bind ServletRepository::class
 
