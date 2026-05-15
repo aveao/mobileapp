@@ -1,6 +1,9 @@
 
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -261,8 +264,8 @@ android {
         applicationId = "coredevices.coreapp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        // This uses the number of commits in the git history, so it will always increase on main
-        versionCode = versioning.getVersionCode()
+        // UTC build timestamp as YYYYMMDDHH — monotonically increases and survives rebases
+        versionCode = ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyyMMddHH")).toInt()
         versionName = try { versioning.getVersionName() } catch (e: Exception) { "unknown" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
