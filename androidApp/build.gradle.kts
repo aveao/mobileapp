@@ -1,3 +1,6 @@
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -18,13 +21,10 @@ val localReleaseBuild = properties["LOCAL_RELEASE_BUILD"]?.toString()?.toBoolean
 // Hoisted out of the lambda below, which must not capture the project.
 val providerFactory = providers
 
-// Number of commits in the git history, so it always increases on main.
-val gitVersionCode = providers.exec {
-    isIgnoreExitValue = true
-    commandLine("git", "rev-list", "--count", "HEAD")
-}.standardOutput.asText.map {
-    it.trim().toIntOrNull() ?: throw GradleException("Error reading current commit count")
-}
+// UTC build timestamp as YYYYMMDDHH — monotonically increases and survives rebases.
+val buildVersionCode = ZonedDateTime.now(ZoneOffset.UTC)
+    .format(DateTimeFormatter.ofPattern("yyyyMMddHH"))
+    .toInt()
 
 // Newest tag anywhere in the repo, including on branches HEAD doesn't descend from.
 val gitVersionName = providers.exec {
@@ -127,7 +127,7 @@ dependencies {
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach {
-            it.versionCode.set(gitVersionCode)
+            it.versionCode.set(buildVersionCode)
             it.versionName.set(gitVersionName)
         }
     }
