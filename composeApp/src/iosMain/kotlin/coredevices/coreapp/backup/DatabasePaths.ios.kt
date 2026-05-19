@@ -1,21 +1,16 @@
-package io.rebble.libpebblecommon.database
+package coredevices.coreapp.backup
 
-import androidx.room.Room
-import androidx.room.RoomDatabase
 import io.rebble.libpebblecommon.connection.AppContext
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDomainMask
 
-internal actual fun getDatabaseBuilder(ctx: AppContext): RoomDatabase.Builder<Database> {
-    val dbFilePath = documentDirectory() + "/$DATABASE_FILENAME"
-    return Room.databaseBuilder<Database>(
-        name = dbFilePath,
-    )
+actual fun getCoreDatabasePath(appContext: AppContext): String {
+    return documentDirectory() + "/$CORE_DB_FILENAME"
 }
 
-actual fun getLibPebbleDatabasePath(ctx: AppContext): String {
-    return documentDirectory() + "/$DATABASE_FILENAME"
+actual fun getRingDatabasePath(appContext: AppContext): String {
+    return documentDirectory() + "/$RING_DB_FILENAME"
 }
 
 private fun documentDirectory(): String {
