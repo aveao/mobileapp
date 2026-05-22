@@ -63,6 +63,36 @@ private fun getNameFromUri(uri: Uri, contentResolver: ContentResolver): String? 
 }
 
 @Composable
+actual fun rememberSaveDocumentLauncher(
+    mimeType: String,
+    onResult: (Boolean) -> Unit,
+): (suggestedName: String, sourcePath: kotlinx.io.files.Path) -> Unit {
+    val context = LocalContext.current
+    val pendingSourcePath = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mimeType)) { uri: Uri? ->
+        if (uri != null && pendingSourcePath.value != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    java.io.FileInputStream(pendingSourcePath.value!!).use { input ->
+                        input.copyTo(output)
+                    }
+                }
+                onResult(true)
+            } catch (_: Exception) {
+                onResult(false)
+            }
+        } else {
+            onResult(false)
+        }
+        pendingSourcePath.value = null
+    }
+    return { suggestedName, sourcePath ->
+        pendingSourcePath.value = sourcePath.toString()
+        launcher.launch(suggestedName)
+    }
+}
+
+@Composable
 actual fun rememberOpenPhotoLauncher(onResult: (List<DocumentAttachment>?) -> Unit): () -> Unit {
     val launcher = rememberOpenDocumentLauncher(onResult)
     return {

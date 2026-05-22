@@ -12,3 +12,7 @@ internal actual fun getDatabaseBuilder(ctx: AppContext): RoomDatabase.Builder<Da
         name = dbFile.absolutePath,
     )
 }
+
+actual fun getLibPebbleDatabasePath(ctx: AppContext): String {
+    return File(System.getProperty("java.io.tmpdir"), DATABASE_FILENAME).absolutePath
+}
