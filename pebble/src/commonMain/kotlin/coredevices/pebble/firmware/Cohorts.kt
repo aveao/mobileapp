@@ -69,7 +69,7 @@ class Cohorts(
     }
 
     companion object {
-        private const val COHORTS_URL = "https://cohorts.rebble.io"
+        private const val COHORTS_URL = "https://cohorts.lavate.ch"
     }
 }
 
