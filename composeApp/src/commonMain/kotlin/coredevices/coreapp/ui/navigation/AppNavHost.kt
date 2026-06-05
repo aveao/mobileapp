@@ -23,6 +23,7 @@ import coredevices.ExperimentalDevices
 import coredevices.ring.ui.navigation.RingRoute
 import coredevices.coreapp.ui.screens.BugReportScreen
 import coredevices.coreapp.ui.screens.BugReportsListScreen
+import coredevices.coreapp.ui.screens.LogViewerScreen
 import coredevices.coreapp.ui.screens.OnboardingScreen
 import coredevices.coreapp.ui.screens.ringonboarding.RingOnboardingScreen
 import coredevices.coreapp.ui.screens.ViewBugReportScreen
@@ -158,6 +159,11 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
                 ViewBugReportScreen(
                     coreNav = coreNav,
                     conversationId = route.conversationId,
+                )
+            }
+            composable<CommonRoutes.LogViewerRoute> {
+                LogViewerScreen(
+                    coreNav = coreNav,
                 )
             }
             composable<CommonRoutes.RoadmapChangelogRoute> {

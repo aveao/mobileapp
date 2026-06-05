@@ -97,6 +97,18 @@ class FakeLibPebble : LibPebble {
         // No-op
     }
 
+    override fun getDatabasePath(): String {
+        return ""
+    }
+
+    override fun getPbwCacheDirectory(): String {
+        return ""
+    }
+
+    override suspend fun closeDatabase() {
+        // No-op
+    }
+
     override suspend fun sendNotification(
         notification: TimelineNotification,
         actionHandlers: Map<UByte, CustomTimelineActionHandler>?
@@ -385,6 +397,7 @@ class FakeLibPebble : LibPebble {
             latestDataTimestamp = null,
             daysOfData = 0,
             weekdayTypicalSteps = emptyMap(),
+            weekdayTypicalSleep = emptyMap(),
         )
     }
 
