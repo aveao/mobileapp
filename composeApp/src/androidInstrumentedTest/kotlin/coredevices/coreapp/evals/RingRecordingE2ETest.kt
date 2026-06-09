@@ -12,6 +12,7 @@ import coredevices.indexai.database.dao.RecordingEntryDao
 import coredevices.util.CommonBuildKonfig as CBK
 import coredevices.ring.agent.AgentFactory
 import coredevices.ring.agent.AgentNenya
+import coredevices.ring.agent.SearchAgentNenya
 import coredevices.ring.agent.BuiltinServletRepository
 import coredevices.ring.agent.McpSessionFactory
 import coredevices.ring.agent.builtin_servlets.notes.NoteProvider
@@ -39,6 +40,7 @@ import coredevices.ring.service.recordings.RecordingPreprocessor
 import coredevices.ring.service.recordings.RecordingProcessingQueue
 import coredevices.ring.service.recordings.RecordingProcessor
 import coredevices.ring.service.recordings.button.RecordingOperationFactory
+import coredevices.ring.storage.RealRecordingStorage
 import coredevices.ring.storage.RecordingStorage
 import coredevices.ring.util.trace.RingTraceSession
 import coredevices.util.Platform
@@ -593,13 +595,14 @@ class RingRecordingE2ETest {
         singleOf(::DocumentEncryptor)
 
         // Processing pipeline
-        singleOf(::RecordingStorage)
+        singleOf(::RealRecordingStorage) bind RecordingStorage::class
         singleOf(::RecordingPreprocessor)
         singleOf(::RecordingProcessor)
         singleOf(::RingTraceSession)
 
         // Agent
-        factory { p -> AgentNenya(get(), p.getOrNull() ?: emptyList(), p.getOrNull() ?: false) }
+        factory { p -> AgentNenya(get(), p.getOrNull() ?: emptyList()) }
+        factory { p -> SearchAgentNenya(get(), get(), get(), p.getOrNull() ?: emptyList()) }
         singleOf(::AgentFactory)
         singleOf(::RecordingOperationFactory)
 

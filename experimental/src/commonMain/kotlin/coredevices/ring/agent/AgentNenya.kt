@@ -7,12 +7,8 @@ import coredevices.indexai.data.entity.ConversationMessageDocument
 import coredevices.indexai.data.entity.MessageRole
 import coredevices.mcp.client.McpSession
 import coredevices.mcp.client.McpSessionTool
-import coredevices.mcp.data.SemanticResult
 import coredevices.mcp.data.ToolCallResult
 import coredevices.ring.api.NenyaClient
-import coredevices.ring.database.room.repository.ItemRepository
-import coredevices.ring.service.indexfeed.ItemFactory
-import coredevices.ring.service.indexfeed.RecordingSessionContext
 import io.ktor.http.isSuccess
 import kotlinx.io.IOException
 import kotlinx.serialization.EncodeDefault
@@ -27,7 +23,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.koin.core.component.KoinComponent
-import kotlin.time.Clock
 
 /**
  * Online agent backed by the Nenya HTTP API. Iterative: tool results are fed
@@ -36,10 +31,7 @@ import kotlin.time.Clock
  */
 class AgentNenya(
     private val nenyaClient: NenyaClient,
-    private val itemFactory: ItemFactory,
-    private val itemRepository: ItemRepository,
     conversation: List<ConversationMessageDocument>,
-    private val useSearchMode: Boolean = false
 ): KoinComponent, IterativeAgent(conversation) {
     override val label = "Nenya"
 
@@ -64,10 +56,22 @@ both as the content unless it's clearly two separate actions, for example 'remin
 """
     }
 
+    /**
+     * Sanitizing to the most strict subset providers use, which is the MCP spec (a-z,A-Z,_,-,.) + no dots (.),
+     * + 64 max chars. Covers Gemini + Claude
+     */
+    private fun sanitizeToolName(name: String): String {
+        return name.trim().replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64)
+    }
+
     private fun prepareTools(tools: List<McpSessionTool>): List<ToolDeclaration> {
         return tools.mapNotNull {
             val definition = it.tool.definition
-            val compositeName = "${it.integrationName}__${definition.name}"
+            val compositeNameRaw = "${it.integrationName}__${definition.name}"
+            val compositeName = sanitizeToolName(compositeNameRaw)
+            if (compositeName != compositeNameRaw) {
+                logger.w { "Tool name '${definition.name}' from integration '${it.integrationName}' was sanitized to '$compositeName' to meet provider requirements" }
+            }
             try {
                 ToolDeclaration(
                     function = FunctionDeclaration(
@@ -175,66 +179,6 @@ both as the content unless it's clearly two separate actions, for example 'remin
 
     override fun encodeToolResultContent(result: ToolCallResult): String =
         buildJsonObject { put("result", result.resultString) }.toString()
-
-    override suspend fun send(
-        input: String,
-        mcpSession: McpSession,
-        includePromptsFromMcps: Map<String, Set<String>>,
-        skipToolExecution: Boolean
-    ) {
-        if (useSearchMode) {
-            sendSearch(input, mcpSession)
-        } else {
-            super.send(input, mcpSession, includePromptsFromMcps, skipToolExecution)
-        }
-    }
-
-    private suspend fun sendSearch(input: String, mcpSession: McpSession) {
-        emit(ConversationMessageDocument(role = MessageRole.user, content = input))
-        val resp = try {
-            nenyaClient.run(
-                conversationHistory = currentConversation().filter {
-                    it.role != MessageRole.tool || it.tool_call_id != null // filter out tool messages that are not tool call responses (e.g. fake search completion message above)
-                },
-                toolSpecs = emptyList(),
-                additionalContext = "Provide a concise answer to the query after searching the internet, to be shown on a small display. The answer should have no additional commentary or markdown formatting.",
-                searchMode = true
-            )
-        } catch (e: IOException) {
-            throw AgentNetworkException("Network error when running agent: ${e.message}", e)
-        }
-        if (!resp.statusCode.isSuccess()) {
-            if (resp.statusCode.value in 501..504) {
-                throw AgentNetworkException("Network error at gateway when running agent: ${resp.statusCode} (${resp.response?.message})")
-            } else {
-                throw Exception("Failed to run agent: ${resp.statusCode} (${resp.response?.message})")
-            }
-        }
-        val text = resp.response?.conversation?.last()!!.toConversationMessage(resp.response.language_model_used).content
-            ?.replace("**", "") // remove markdown bolding
-        emit(
-            ConversationMessageDocument(
-                role = MessageRole.tool,
-                content = "",
-                semantic_result = SemanticResult.SupportingData(text ?: "No results", assistiveOnly = false)
-            )
-        )
-
-        currentSessionContext()?.let { ctx ->
-            runCatching {
-                itemRepository.setItem(
-                    itemFactory.simpleUid(),
-                    itemFactory.answerItem(
-                        sourceRecordingId = ctx.sourceRecordingId,
-                        createdAt = ctx.createdAt,
-                        question = input,
-                        answer = text ?: "No results",
-                        toolCallId = null
-                    )
-                )
-            }
-        }
-    }
 }
 
 @Serializable
