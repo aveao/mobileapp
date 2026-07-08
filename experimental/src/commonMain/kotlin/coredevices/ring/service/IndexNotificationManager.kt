@@ -118,7 +118,7 @@ class IndexNotificationManager(
         )
 
         when (transfer.status) {
-            RingTransferStatus.Started -> {
+            RingTransferStatus.Started, RingTransferStatus.Saving -> {
                 return InflightIndexNotification.Transferring(notifId, timestamp)
             }
             RingTransferStatus.Discarded -> {
@@ -372,6 +372,9 @@ class IndexNotificationManager(
                                                     }
                                                 }
                                                 is SemanticResult.Response -> {
+                                                    appendLine(lastAction.text)
+                                                }
+                                                is SemanticResult.MessageSent -> {
                                                     appendLine(lastAction.text)
                                                 }
                                                 else -> {

@@ -137,7 +137,7 @@ class FakeLibPebble : LibPebble {
         // No-op
     }
 
-    override fun checkForFirmwareUpdates() {
+    override fun checkForFirmwareUpdates(force: Boolean) {
     }
 
     override suspend fun updateTimeIfNeeded() {
@@ -623,7 +623,7 @@ class FakeConnectedDevice(
 
     override fun updateFirmware(update: FirmwareUpdateCheckResult.FoundUpdate) {}
 
-    override fun checkforFirmwareUpdate() {}
+    override fun checkforFirmwareUpdate(force: Boolean) {}
 
     override suspend fun launchApp(uuid: Uuid) {}
 
@@ -763,7 +763,7 @@ class FakeConnectedDeviceInRecovery(
 
     override fun updateFirmware(update: FirmwareUpdateCheckResult.FoundUpdate) {}
 
-    override fun checkforFirmwareUpdate() {}
+    override fun checkforFirmwareUpdate(force: Boolean) {}
 
     override val watchInfo: WatchInfo = WatchInfo(
         runningFwVersion = FirmwareVersion.from(

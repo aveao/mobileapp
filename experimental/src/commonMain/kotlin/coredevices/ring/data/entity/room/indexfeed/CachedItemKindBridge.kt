@@ -36,6 +36,7 @@ val ItemMetadata.kind: String get() = when (this) {
     is ItemMetadata.Answer -> "answer"
     is ItemMetadata.ActionLog -> "action_log"
     is ItemMetadata.McpCall -> "mcp_call"
+    is ItemMetadata.DelegatedToIntegration -> "delegated"
     ItemMetadata.Note -> "note"
     ItemMetadata.Checklist -> "checklist"
 }
@@ -56,6 +57,7 @@ private fun ItemMetadata.toFieldsJsonObject(): JsonObject {
         is ItemMetadata.Reminder -> buildJsonObject {
             put("repeat", repeat)
             put("notification", notification)
+            notifyBeforeMillis?.let { put("notifyBeforeMillis", it) }
         }
         is ItemMetadata.Scheduled -> buildJsonObject {
             put("fireKind", when (fireKind) {
@@ -96,6 +98,9 @@ private fun ItemMetadata.toFieldsJsonObject(): JsonObject {
         is ItemMetadata.McpCall -> buildJsonObject {
             put("toolName", toolName)
             put("success", success)
+        }
+        is ItemMetadata.DelegatedToIntegration -> buildJsonObject {
+            put("integration", integration)
         }
         ItemMetadata.Note -> JsonObject(emptyMap())
         ItemMetadata.Checklist -> JsonObject(emptyMap())

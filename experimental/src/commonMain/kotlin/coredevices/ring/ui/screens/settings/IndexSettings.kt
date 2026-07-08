@@ -819,6 +819,8 @@ fun BackupDialog(
     var showDeleteLocalConfirm by remember { mutableStateOf(false) }
     var deleteLocalInput by remember { mutableStateOf("") }
     var showOverwriteKeyConfirm by remember { mutableStateOf(false) }
+    var showEnterKeyDialog by remember { mutableStateOf(false) }
+    var enterKeyInput by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         viewModel.loadBackupCount()
@@ -852,6 +854,46 @@ fun BackupDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showOverwriteKeyConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    if (showEnterKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showEnterKeyDialog = false; enterKeyInput = "" },
+            modifier = Modifier.dismissKeyboardOnTapOutside(),
+            title = { Text("Enter Encryption Key") },
+            text = {
+                Column {
+                    val focusManager = LocalFocusManager.current
+                    Text("Type or paste the encryption key from another device.")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = enterKeyInput,
+                        onValueChange = { enterKeyInput = it },
+                        singleLine = true,
+                        label = { Text("Encryption key") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = enterKeyInput.isNotBlank() && !encryptionKeyLoading,
+                    onClick = {
+                        viewModel.importKeyFromText(enterKeyInput)
+                        showEnterKeyDialog = false
+                        enterKeyInput = ""
+                    }
+                ) {
+                    Text("Import")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEnterKeyDialog = false; enterKeyInput = "" }) {
                     Text("Cancel")
                 }
             }
@@ -1116,6 +1158,18 @@ fun BackupDialog(
                 headlineContent = { Text("Import Key from QR Code") },
                 supportingContent = {
                     Text("Pick your key's QR code from your photos")
+                }
+            )
+
+            // Enter the key manually as text (e.g. copied from another device)
+            ListItem(
+                modifier = Modifier.clickable(enabled = !encryptionKeyLoading) {
+                    enterKeyInput = ""
+                    showEnterKeyDialog = true
+                },
+                headlineContent = { Text("Enter Key Manually") },
+                supportingContent = {
+                    Text("Type or paste your encryption key as text")
                 }
             )
 
@@ -1534,6 +1588,8 @@ fun NotionPageDialog(onDismiss: () -> Unit) {
 
     M3Dialog(
         onDismissRequest = onDismiss,
+        // The page list can be long; scroll it so the buttons stay reachable.
+        scrollableContent = true,
         title = { Text("Notion Page") },
         buttons = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -1552,7 +1608,7 @@ fun NotionPageDialog(onDismiss: () -> Unit) {
     ) {
         Column {
             Text(
-                "Choose the page to place your notes' Todo list in.",
+                "Choose the page to place your notes' Reminders list in.",
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(Modifier.height(12.dp))
@@ -1568,8 +1624,10 @@ fun NotionPageDialog(onDismiss: () -> Unit) {
                 loadedPages.isEmpty() -> Text(
                     "No pages found. Give Index access to a page in Notion, then try again."
                 )
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(loadedPages) { page ->
+                // Plain Column (not LazyColumn): the dialog content scrolls via
+                // scrollableContent, and nested lazy lists inside verticalScroll crash.
+                else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    loadedPages.forEach { page ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
