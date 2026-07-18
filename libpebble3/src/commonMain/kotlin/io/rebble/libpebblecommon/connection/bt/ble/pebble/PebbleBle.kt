@@ -77,6 +77,7 @@ class PebbleBle(
                 serviceUuid = PPOGATT_WATCH_SERVER_V2_SERVICE,
                 notifyCharacteristic = PPOGATT_WATCH_SERVER_V2_DATA,
                 writeCharacteristic = PPOGATT_WATCH_SERVER_V2_DATA_WR,
+                version = ReversePpogVersion.V2,
             )
 
             libPebbleConfigFlow.value.bleConfig.legacyReversedPPoG && watchServices.any { it.uuid == PPOGATT_DEVICE_SERVICE_UUID_CLIENT } -> PpogClientConfig(
@@ -85,6 +86,7 @@ class PebbleBle(
                 // V1 legacy firmware accepts data writes on the notify char
                 // itself, and that's what the original shipped phone app did.
                 writeCharacteristic = PPOGATT_DEVICE_CHARACTERISTIC_READ,
+                version = ReversePpogVersion.V1,
             )
 
             else -> null
@@ -111,7 +113,7 @@ class PebbleBle(
             }
         }
         val mtuResult = mtuParam.update(device, TARGET_MTU)
-        if (mtuResult != PebbleConnectionResult.Success) {
+        if (mtuResult !is PebbleConnectionResult.Success) {
             return mtuResult
         }
         logger.d("done mtu update")
@@ -151,21 +153,43 @@ class PebbleBle(
 
         if (needToPair) {
             val pairingResult =
-                pairing.requestBlePairing(device, connectionStatus, connectivity.status, identifier)
+                pairing.requestBlePairing(device, connectionStatus, connectivity, identifier)
             if (pairingResult != null) {
                 return PebbleConnectionResult.Failed(pairingResult)
             }
         }
 
+        var useReversed = false
         if (reversedConfig != null) {
             // Subscribe to the watch's notify characteristic and wire up the
             // reversed-PPoG transport. Done after pairing so the link is
             // encrypted before we subscribe.
-            ppogPacketSenderProxy.configureReversed(device, reversedConfig)
+            useReversed = try {
+                ppogPacketSenderProxy.configureReversed(device, reversedConfig)
+                true
+            } catch (e: Exception) {
+                // iOS in particular can return a `40000000` reversed-PPoG
+                // service in its cached GATT results even after the watch
+                // stopped advertising it (booted into a firmware without
+                // reversed PPoG, ran the recovery slot, etc.). The subscribe
+                // then fails with CBATTError "invalid handle". CoreBluetooth
+                // gives us no way to force a re-discovery — fall back to
+                // forward-PPoG for this connection and let the phone's own
+                // GATT server carry the session.
+                logger.w(
+                    "reversed PPoG setup failed (likely stale iOS GATT cache); falling back to forward",
+                    e
+                )
+                if (!gattServerManager.registerDevice(identifier, pPoGStream.inboundPPoGBytesChannel)) {
+                    return PebbleConnectionResult.Failed(ConnectionFailureReason.RegisterGattServer)
+                }
+                ppogPacketSenderProxy.configureForward()
+                false
+            }
         }
 
-        ppog.run(reversed = reversedConfig != null)
-        return PebbleConnectionResult.Success
+        ppog.run(reversed = useReversed)
+        return PebbleConnectionResult.Success(if (useReversed) reversedConfig?.version else null)
     }
 
     override suspend fun disconnect() {

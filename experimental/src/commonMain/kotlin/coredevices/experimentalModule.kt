@@ -15,6 +15,7 @@ import coredevices.ring.transcription.InferenceBoostProvider
 import coredevices.ring.transcription.NoOpInferenceBoostProvider
 import coredevices.util.transcription.CactusModelPathProvider
 import coredevices.ring.agent.AgentFactory
+import coredevices.ring.agent.LLMLocationProvider
 import coredevices.ring.agent.IndexAgentNenya
 import coredevices.ring.agent.McpSandboxAgentNenya
 import coredevices.ring.agent.SearchAgentNenya
@@ -28,12 +29,14 @@ import coredevices.ring.agent.builtin_servlets.reminders.ReminderIntegrationFact
 import coredevices.ring.agent.builtin_servlets.reminders.createBuiltInReminderIntegration
 import coredevices.ring.agent.integrations.DelegatedIntegrationItems
 import coredevices.ring.agent.integrations.GTasksIntegration
+import coredevices.ring.agent.integrations.TickTickIntegration
 import coredevices.ring.agent.integrations.UIEmailIntegration
 import coredevices.ring.api.ApiConfig
 import coredevices.ring.api.GoogleTasksApi
 import coredevices.ring.api.NenyaClient
 import coredevices.ring.api.NenyaClientImpl
 import coredevices.ring.api.NotionApi
+import coredevices.ring.api.TickTickApi
 import coredevices.ring.audio.M4aEncoder
 import coredevices.ring.database.Preferences
 import coredevices.ring.database.PreferencesImpl
@@ -43,6 +46,7 @@ import coredevices.ring.database.room.repository.RecordingProcessingTaskReposito
 import coredevices.ring.database.room.repository.ItemRepository
 import coredevices.ring.database.room.repository.ListRepository
 import coredevices.ring.database.room.repository.RecordingRepository
+import coredevices.ring.reminders.ReminderCompleter
 import coredevices.ring.reminders.ReminderDeepLinkResolver
 import coredevices.ring.service.indexfeed.DefaultListsBootstrap
 import coredevices.ring.service.indexfeed.IndexFeedSyncService
@@ -171,6 +175,7 @@ val experimentalModule = module {
     singleOf(::IndexFeedSyncService)
     singleOf(::ItemFactory)
     singleOf(::ReminderDeepLinkResolver)
+    singleOf(::ReminderCompleter)
     singleOf(::PreferencesImpl) binds arrayOf(Preferences::class, BasePreferences::class)
     singleOf(::RingTraceSession)
     singleOf(::TraceSessionExporter)
@@ -180,6 +185,7 @@ val experimentalModule = module {
             nenyaUrl = BuildKonfig.NENYA_URL,
             notionOAuthBackendUrl = BuildKonfig.NOTION_OAUTH_BACKEND_URL,
             notionApiUrl = "https://api.notion.com/v1",
+            tickTickOAuthBackendUrl = BuildKonfig.TICKTICK_OAUTH_BACKEND_URL,
             bugUrl = CommonBuildKonfig.BUG_URL,
             version = CommonBuildKonfig.USER_AGENT_VERSION,
             tokenUrl = CommonBuildKonfig.TOKEN_URL,
@@ -189,6 +195,7 @@ val experimentalModule = module {
     singleOf(::NenyaClientImpl) bind NenyaClient::class
     singleOf(::NotionApi)
     singleOf(::GoogleTasksApi)
+    singleOf(::TickTickApi)
     singleOf(::M4aEncoder)
     singleOf(::IndexWebhookPreferences)
     singleOf(::ObsidianPreferences)
@@ -214,6 +221,7 @@ val experimentalModule = module {
     singleOf(::ExperimentalDevices)
     singleOf(::PrefsCollectionIndexStorage) bind CollectionIndexStorage::class
     factory { HackyPermissionRequesterProvider { get<PermissionRequester>() } }
+    singleOf(::LLMLocationProvider)
     factory { p -> AgentNenya(get(), p.getOrNull() ?: "", p.getOrNull() ?: NenyaModel.Default, p.getOrNull() ?: emptyList()) }
     factory { p -> IndexAgentNenya(get(), p.getOrNull() ?: emptyList()) }
     factory { p -> McpSandboxAgentNenya(get(), p.getOrNull() ?: NenyaModel.Default, p.getOrNull() ?: emptyList()) }
@@ -229,8 +237,8 @@ val experimentalModule = module {
     singleOf(::RingHacksDelegate) bind KMPHaversineHacksDelegate::class
     singleOf(::McpSandboxRepository)
     singleOf(::BuiltinServletRepository) bind ServletRepository::class
-
-    factoryOf(::GTasksIntegration)
+    factory { GTasksIntegration(get()) }
+    factory { TickTickIntegration(get(), get()) }
     factoryOf(::UIEmailIntegration)
     single { createBuiltInReminderIntegration() }
     singleOf(::BuiltInReminderFeedItems)

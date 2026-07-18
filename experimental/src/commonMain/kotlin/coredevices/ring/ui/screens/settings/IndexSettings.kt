@@ -2,6 +2,7 @@ package coredevices.ring.ui.screens.settings
 
 import BugReportButton
 import CoreNav
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Search
@@ -31,12 +34,16 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -61,6 +68,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -70,6 +79,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import co.touchlab.kermit.Logger
 import coreapp.util.generated.resources.back
 import coreapp.util.generated.resources.ring_wireframe
 import coreapp.util.generated.resources.settings
@@ -80,6 +90,7 @@ import coredevices.ring.agent.builtin_servlets.notes.TASKER_DEFINITION
 import coredevices.ring.agent.builtin_servlets.reminders.ReminderProvider
 import coredevices.ring.agent.integrations.GTasksIntegration
 import coredevices.ring.agent.integrations.NotionIntegration
+import coredevices.ring.agent.integrations.TickTickIntegration
 import coredevices.ring.agent.integrations.obsidian.ObsidianIntegration
 import coredevices.ring.data.NoteShortcutType
 import coredevices.ring.database.MusicControlMode
@@ -114,6 +125,16 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import coreapp.util.generated.resources.Res as UtilRes
+
+// openUri throws if nothing can handle the link (no browser, DPC policy);
+// don't let a help link tap crash the settings screen.
+private fun UriHandler.openUrlSafely(url: String) {
+    try {
+        openUri(url)
+    } catch (e: Exception) {
+        Logger.w(e) { "Failed to open URL: $url" }
+    }
+}
 
 @Composable
 fun IndexSettings(coreNav: CoreNav) {
@@ -241,6 +262,72 @@ fun IndexSettings(coreNav: CoreNav) {
         LazyColumn(
             modifier = Modifier.padding(padding).fillMaxHeight()
         ) {
+            // Getting Started guide + FAQ — Index 01 is a new kind of device,
+            // so steer everyone to the guide. Opens in the system browser.
+            item {
+                val uriHandler = LocalUriHandler.current
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.MenuBook,
+                                contentDescription = null
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "New to Index 01?",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "It's a new kind of gadget! A quick read goes a long way.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Inverted colors so the button stands out on the container card
+                            Button(
+                                onClick = { uriHandler.openUrlSafely("https://pbl.zip/index-guide") },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.secondaryContainer,
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Getting Started Guide")
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { uriHandler.openUrlSafely("https://pbl.zip/index-faq") },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f)
+                                ),
+                            ) {
+                                Text("FAQ")
+                            }
+                        }
+                    }
+                }
+            }
+
             // Device card
             item {
                 IndexDeviceListItem(
@@ -1460,9 +1547,11 @@ fun AuthorizedIntegrations(preferences: Preferences) {
     val notion = koinInject<NotionIntegration>()
     val noteIntegrationFactory = koinInject<NoteIntegrationFactory>()
     val obsidian = koinInject<ObsidianIntegration>()
+    val tickTick = koinInject<TickTickIntegration>()
     val obsidianAuth by flow { emit(obsidian.isAuthorized()) }.collectAsState(false)
     val gTasksAuth by flow { emit(gTasks.isAuthorized()) }.collectAsState(false)
     val notionAuth by flow { emit(notion.isAuthorized()) }.collectAsState(false)
+    val tickTickAuth by flow { emit(tickTick.isAuthorized()) }.collectAsState(false)
     val taskerAuth by flow {
         emit(noteIntegrationFactory.createNoteClient(NoteProvider.Tasker).isAuthorized())
     }.collectAsState(false)
@@ -1515,6 +1604,17 @@ fun AuthorizedIntegrations(preferences: Preferences) {
                 selectedReminderProvider = currentReminderProvider == ReminderProvider.GoogleTasks,
                 selectedNoteProvider = false,
                 onSelectReminderProvider = { preferences.setReminderProvider(ReminderProvider.GoogleTasks) },
+                onSelectNoteProvider = {}
+            )
+        }
+        if (tickTickAuth) {
+            IntegrationItem(
+                title = TickTickIntegration.DEFINITION.title,
+                hasReminder = true,
+                hasNotes = false,
+                selectedReminderProvider = currentReminderProvider == ReminderProvider.TickTick,
+                selectedNoteProvider = false,
+                onSelectReminderProvider = { preferences.setReminderProvider(ReminderProvider.TickTick) },
                 onSelectNoteProvider = {}
             )
         }

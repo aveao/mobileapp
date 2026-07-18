@@ -69,7 +69,7 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
                 }
                 scope.launch {
                     pebbleDeepLinks.navigateToPebbleDeepLink.collect { route ->
-                        if (route == null) {
+                        if (route == null || route.consumed) {
                             return@collect
                         }
                         val isOnWatchHome = navController.currentBackStackEntry?.destination?.hasRoute<PebbleRoutes.WatchHomeRoute>() == true
