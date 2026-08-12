@@ -1,0 +1,36 @@
+package coredevices.coreapp.backup
+
+import coredevices.ring.agent.LlmMode
+import coredevices.ring.agent.builtin_servlets.messaging.ApprovedBeeperContact
+import coredevices.ring.database.MusicControlMode
+import coredevices.ring.database.SecondaryMode
+import coredevices.util.CoreConfig
+import io.rebble.libpebblecommon.LibPebbleConfig
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class SettingsExport(
+    val coreConfig: CoreConfig? = null,
+    val libPebbleConfig: LibPebbleConfig? = null,
+    val ringPreferences: RingPreferencesExport? = null,
+)
+
+@Serializable
+data class RingPreferencesExport(
+    val llmMode: Int = LlmMode.RemoteOnly.id,
+    val useCactusTranscription: Boolean = true,
+    val cactusMode: Int = 0,
+    val ringPaired: String? = null,
+    val musicControlMode: Int = MusicControlMode.DoubleClick.id,
+    val lastSyncIndex: Int? = null,
+    val debugDetailsEnabled: Boolean = false,
+    val approvedBeeperContacts: List<ApprovedBeeperContact> = emptyList(),
+    val secondaryMode: Int = SecondaryMode.Search.id,
+    val secondaryModeMcpGroupId: Long? = null,
+    val reminderProvider: Int = 1,
+    val noteProvider: Int = 1,
+    val noteShortcut: String? = null,
+    val autoDismissActionNotifications: Boolean = true,
+    val phoneCalendarEnabled: Boolean = false,
+    val platformSttDefaulted: Boolean = false,
+)
