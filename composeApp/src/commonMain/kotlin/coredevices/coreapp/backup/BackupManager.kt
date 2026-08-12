@@ -181,7 +181,7 @@ class BackupManager(
 
     private fun exportRingPreferences(): RingPreferencesExport {
         return RingPreferencesExport(
-            useCactusAgent = preferences.useCactusAgent.value,
+            llmMode = preferences.llmMode.value.id,
             useCactusTranscription = preferences.useCactusTranscription.value,
             cactusMode = preferences.cactusMode.id,
             ringPaired = preferences.ringPaired.value,
@@ -190,11 +190,15 @@ class BackupManager(
             debugDetailsEnabled = preferences.debugDetailsEnabled.value,
             approvedBeeperContacts = preferences.approvedBeeperContacts.value,
             secondaryMode = preferences.secondaryMode.value.id,
+            secondaryModeMcpGroupId = preferences.secondaryModeMcpGroupId.value,
             reminderProvider = preferences.reminderProvider.value.id,
             noteProvider = preferences.noteProvider.value.id,
             noteShortcut = try {
                 Json.encodeToString(preferences.noteShortcut.value)
             } catch (_: Exception) { null },
+            autoDismissActionNotifications = preferences.autoDismissActionNotifications.value,
+            phoneCalendarEnabled = preferences.phoneCalendarEnabled.value,
+            platformSttDefaulted = preferences.platformSttDefaulted,
         )
     }
 
@@ -205,7 +209,7 @@ class BackupManager(
     }
 
     private suspend fun restoreRingPreferences(prefs: RingPreferencesExport) {
-        preferences.setUseCactusAgent(prefs.useCactusAgent)
+        preferences.setLlmMode(coredevices.ring.agent.LlmMode.fromId(prefs.llmMode))
         preferences.setUseCactusTranscription(prefs.useCactusTranscription)
         preferences.setCactusMode(coredevices.util.models.CactusSTTMode.fromId(prefs.cactusMode))
         preferences.setRingPaired(prefs.ringPaired)
@@ -214,6 +218,11 @@ class BackupManager(
         preferences.setDebugDetailsEnabled(prefs.debugDetailsEnabled)
         preferences.setApprovedBeeperContacts(prefs.approvedBeeperContacts.ifEmpty { null })
         preferences.setSecondaryMode(coredevices.ring.database.SecondaryMode.fromId(prefs.secondaryMode))
+        preferences.setSecondaryModeMcpGroupId(prefs.secondaryModeMcpGroupId)
+        preferences.setAutoDismissActionNotifications(prefs.autoDismissActionNotifications)
+        preferences.setPhoneCalendarEnabled(prefs.phoneCalendarEnabled)
+        // One-way latch; a false value just means it hasn't fired yet.
+        if (prefs.platformSttDefaulted) preferences.setPlatformSttDefaulted()
         coredevices.ring.agent.builtin_servlets.reminders.ReminderProvider.fromId(prefs.reminderProvider)
             ?.let { preferences.setReminderProvider(it) }
         coredevices.ring.agent.builtin_servlets.notes.NoteProvider.fromId(prefs.noteProvider)
