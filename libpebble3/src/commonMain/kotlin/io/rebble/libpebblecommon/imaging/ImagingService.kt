@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.TimeSource
 
 /**
  * Generic image-fetch endpoint (0x35). The watch pulls an image; this service answers every request
@@ -75,6 +76,11 @@ class ImagingService(
             logger.w { "image request token=$token out-of-range ${width}x$height; NO_IMAGE" }
             return sendFlags(token, typeByte, IMAGE_FLAG_NO_IMAGE)
         }
+        logger.d {
+            "request token=$token type=$type ${width}x$height format=${pkt.format.get()}" +
+                if (watchAcceptsDeflate) " (watch inflates)" else ""
+        }
+        val start = TimeSource.Monotonic.markNow()
         val image = try {
             handler.image(pkt)
         } catch (e: CancellationException) {
@@ -83,6 +89,10 @@ class ImagingService(
             // A handler failure must not kill this collector for the rest of the connection.
             logger.w(e) { "image handler failed for token=$token (${width}x$height)" }
             null
+        }
+        logger.d {
+            "token=$token image ${if (image == null) "unavailable" else "ready"} after " +
+                "${start.elapsedNow().inWholeMilliseconds}ms"
         }
         serveImage(token, type, image)
     }
@@ -97,9 +107,22 @@ class ImagingService(
         type: Imaging.ImageType,
         image: EncodedImage?,
     ) = sendLock.withLock {
+        val start = TimeSource.Monotonic.markNow()
         val chunks = buildResponse(token, type, image, watchAcceptsDeflate)
-        logger.d { "responding token=$token type=$type: ${chunks.size} chunk(s), hasImage=${image != null}" }
+        val payload = chunks.sumOf { it.body.get().size }
+        val built = start.elapsedNow()
+        logger.d {
+            "responding token=$token type=$type: ${chunks.size} chunk(s), ${payload}B" +
+                (image?.let { " (${it.pixels.size}B of pixels)" } ?: " hasImage=false") +
+                ", built in ${built.inWholeMilliseconds}ms"
+        }
         chunks.forEach { protocolHandler.send(it) }
+        // Queued, not transmitted: the outbound channel holds 100 packets, so this returns long
+        // before the bytes reach the watch. PPoG logs the drain that actually costs the time.
+        logger.d {
+            "token=$token queued ${chunks.size} chunk(s) in " +
+                "${(start.elapsedNow() - built).inWholeMilliseconds}ms"
+        }
     }
 
     private suspend fun sendFlags(token: UByte, typeByte: UByte, flags: Int) = sendLock.withLock {
