@@ -5,6 +5,7 @@ import io.rebble.libpebblecommon.connection.PebbleProtocolHandler
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
 import io.rebble.libpebblecommon.packets.Imaging
 import io.rebble.libpebblecommon.services.ProtocolService
+import io.rebble.libpebblecommon.util.rawDeflate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.launchIn
@@ -37,6 +38,10 @@ class ImagingService(
     // watch, so only one response is on the wire at a time.
     private val sendLock = Mutex()
 
+    // Whether the watch asked for a compressed pixel stream. Latched off the request format for
+    // the life of the connection, since serveImage can deliver an image long after the request.
+    private var watchAcceptsDeflate = false
+
     /**
      * Register the source of images of [type]. Types with no handler are answered UNSUPPORTED, so
      * the watch stops asking for them for the rest of the connection.
@@ -60,6 +65,9 @@ class ImagingService(
         if (handler == null) {
             logger.w { "no handler for image type $typeByte token=$token" }
             return sendFlags(token, typeByte, IMAGE_FLAG_UNSUPPORTED)
+        }
+        if (Imaging.Format.from(pkt.format.get()) == Imaging.Format.Palette4BitDeflate) {
+            watchAcceptsDeflate = true
         }
         val width = pkt.width.get().toInt()
         val height = pkt.height.get().toInt()
@@ -89,7 +97,7 @@ class ImagingService(
         type: Imaging.ImageType,
         image: EncodedImage?,
     ) = sendLock.withLock {
-        val chunks = buildResponse(token, type, image)
+        val chunks = buildResponse(token, type, image, watchAcceptsDeflate)
         logger.d { "responding token=$token type=$type: ${chunks.size} chunk(s), hasImage=${image != null}" }
         chunks.forEach { protocolHandler.send(it) }
     }
@@ -118,6 +126,7 @@ private const val IMAGE_TYPE_MASK = 0x0F
 
 // Format byte in the image header (must match the firmware's ImagingFormat).
 private const val IMAGE_FORMAT_4BIT_PALETTE = 0x02
+private const val IMAGE_FORMAT_4BIT_PALETTE_DEFLATE = 0x03
 
 // Pixel bytes per chunk; keeps each Pebble Protocol frame around 1 KB.
 private const val IMAGE_CHUNK_PIXELS = 1000
@@ -147,27 +156,39 @@ private fun flagsOnlyBody(token: UByte, typeByte: UByte, flags: Int): UByteArray
 /**
  * Split [image] into Imaging.Response chunks matching the firmware's wire format (after the command
  * byte the packet prepends):
- *   [token u8][flags u8][offset u32 LE][len u16 LE]([w u16][h u16][format u8][paletteCount u8][palette]) [pixels]
+ *   [token u8][flags u8][offset u32 LE][len u16 LE]([w u16][h u16][format u8][paletteCount u8][palette]([deflatedLen u32 LE])) [pixels]
  * The image header (dimensions, format + palette) rides on the first chunk only. A null image (or
  * one with no pixels) yields a single NO_IMAGE chunk so the watch falls back to its text screen.
+ *
+ * When [deflate] is set and compressing actually shrinks the pixels, the stream sent is the
+ * compressed one, the format says so, and its length follows the palette; offsets and chunk
+ * lengths then count compressed bytes.
  */
 private fun buildResponse(
     token: UByte,
     type: Imaging.ImageType,
     image: EncodedImage?,
+    deflate: Boolean,
 ): List<Imaging.Response> {
     if (image == null || image.pixels.isEmpty()) {
         return listOf(Imaging.Response(flagsOnlyBody(token, type.value, IMAGE_FLAG_NO_IMAGE)))
     }
-    val header = UByteArray(6 + image.palette.size)
+    val compressed = if (deflate) rawDeflate(image.pixels) else null
+    val pixels = compressed ?: image.pixels
+    val total = pixels.size
+
+    val header = UByteArray(6 + image.palette.size + if (compressed != null) 4 else 0)
     le16(image.width, header, 0)
     le16(image.height, header, 2)
-    header[4] = IMAGE_FORMAT_4BIT_PALETTE.toUByte()
+    header[4] =
+        (if (compressed != null) IMAGE_FORMAT_4BIT_PALETTE_DEFLATE else IMAGE_FORMAT_4BIT_PALETTE)
+            .toUByte()
     header[5] = image.palette.size.toUByte()
     image.palette.copyInto(header, 6)
+    if (compressed != null) {
+        le32(total, header, 6 + image.palette.size)
+    }
 
-    val pixels = image.pixels
-    val total = pixels.size
     val chunks = mutableListOf<Imaging.Response>()
     var offset = 0
     var first = true
