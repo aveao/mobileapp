@@ -100,6 +100,21 @@ internal class ImageEncoderTest {
     }
 
     @Test
+    fun orderedDitherLeavesCompressibleRuns() {
+        // The point of the ordered tile over error diffusion: neighbouring pixels of a smooth
+        // image still frequently repeat, which is what the wire's DEFLATE trades on.
+        val art = ImageEncoder.encode(gradient(260, 260), 260, 260)
+        var repeats = 0
+        for (i in 1 until art.pixels.size) {
+            if (art.pixels[i] == art.pixels[i - 1]) repeats++
+        }
+        assertTrue(
+            repeats > art.pixels.size / 2,
+            "expected mostly repeated bytes, got $repeats of ${art.pixels.size}",
+        )
+    }
+
+    @Test
     fun evenPixelIsHighNibble() {
         // 2x1: x=0 black, x=1 white. Black is GColor8 0xC0, white 0xFF.
         val art = ImageEncoder.encode(intArrayOf(argb(0, 0, 0), argb(255, 255, 255)), 2, 1)
