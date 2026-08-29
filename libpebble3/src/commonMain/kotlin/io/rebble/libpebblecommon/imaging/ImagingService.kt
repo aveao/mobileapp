@@ -108,13 +108,23 @@ class ImagingService(
         image: EncodedImage?,
     ) = sendLock.withLock {
         val start = TimeSource.Monotonic.markNow()
-        val chunks = buildResponse(token, type, image, watchAcceptsDeflate)
+        val compressed =
+            if (watchAcceptsDeflate && image != null) rawDeflate(image.pixels) else null
+        val chunks = buildResponse(token, type, image, compressed)
         val payload = chunks.sumOf { it.body.get().size }
         val built = start.elapsedNow()
         logger.d {
-            "responding token=$token type=$type: ${chunks.size} chunk(s), ${payload}B" +
-                (image?.let { " (${it.pixels.size}B of pixels)" } ?: " hasImage=false") +
-                ", built in ${built.inWholeMilliseconds}ms"
+            val pixels = when {
+                image == null -> "no image"
+                compressed != null ->
+                    "${image.pixels.size}B of pixels deflated to ${compressed.size}B"
+                watchAcceptsDeflate ->
+                    "${image.pixels.size}B of pixels sent uncompressed: deflate didn't shrink it"
+                else ->
+                    "${image.pixels.size}B of pixels sent uncompressed: watch didn't ask to inflate"
+            }
+            "responding token=$token type=$type: ${chunks.size} chunk(s), ${payload}B on the wire, " +
+                "$pixels, built in ${built.inWholeMilliseconds}ms"
         }
         chunks.forEach { protocolHandler.send(it) }
         // Queued, not transmitted: the outbound channel holds 100 packets, so this returns long
@@ -183,20 +193,18 @@ private fun flagsOnlyBody(token: UByte, typeByte: UByte, flags: Int): UByteArray
  * The image header (dimensions, format + palette) rides on the first chunk only. A null image (or
  * one with no pixels) yields a single NO_IMAGE chunk so the watch falls back to its text screen.
  *
- * When [deflate] is set and compressing actually shrinks the pixels, the stream sent is the
- * compressed one, the format says so, and its length follows the palette; offsets and chunk
- * lengths then count compressed bytes.
+ * When [compressed] is given it is sent in place of the image's own pixels, the format says so,
+ * and its length follows the palette; offsets and chunk lengths then count compressed bytes.
  */
 private fun buildResponse(
     token: UByte,
     type: Imaging.ImageType,
     image: EncodedImage?,
-    deflate: Boolean,
+    compressed: UByteArray?,
 ): List<Imaging.Response> {
     if (image == null || image.pixels.isEmpty()) {
         return listOf(Imaging.Response(flagsOnlyBody(token, type.value, IMAGE_FLAG_NO_IMAGE)))
     }
-    val compressed = if (deflate) rawDeflate(image.pixels) else null
     val pixels = compressed ?: image.pixels
     val total = pixels.size
 
