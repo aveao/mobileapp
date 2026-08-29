@@ -42,6 +42,17 @@ open class Imaging(val message: Message) : PebblePacket(ProtocolEndpoint.IMAGING
         BlackWhite1Bit(0x00u),
         Color8Bit(0x01u),
         Palette4Bit(0x02u),
+
+        /**
+         * As [Palette4Bit], but the pixel stream is raw-DEFLATE compressed. A watch asks for this
+         * to say it can inflate; the response may still carry [Palette4Bit].
+         */
+        Palette4BitDeflate(0x03u),
+        ;
+
+        companion object {
+            fun from(value: UByte): Format? = entries.firstOrNull { it.value == value }
+        }
     }
 
     /**
