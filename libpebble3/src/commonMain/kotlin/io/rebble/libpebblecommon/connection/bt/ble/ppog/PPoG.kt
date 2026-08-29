@@ -18,6 +18,7 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.min
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 interface PPoGPacketSender {
     suspend fun sendPacket(packet: ByteArray): Boolean
@@ -188,6 +189,10 @@ class PPoG(
         val inboundSequence = Sequence()
         val outboundDataQueue = ArrayDeque<PacketToSend>()
         val inflightPackets = ArrayDeque<PacketToSend>()
+        // Outbound throughput accounting. A burst is everything queued between the backlog being
+        // empty and going empty again, which is the shape a whole image transfer has from here.
+        var burstStart: TimeSource.Monotonic.ValueTimeMark? = null
+        var burstBytes = 0
         val onTimeout = Channel<Unit>()
         var timeoutJob: Job? = null
         var lastSentAck: PPoGPacket.Ack? = null
@@ -237,6 +242,8 @@ class PPoG(
                     resendInflightPackets()
                 }
                 pebbleProtocolStreams.outboundPPBytes.onReceive { bytes ->
+                    if (burstStart == null) burstStart = TimeSource.Monotonic.markNow()
+                    burstBytes += bytes.size
                     bytes.asList().chunked(maxDataBytes())
                         .map { chunk ->
                             PacketToSend(
@@ -312,6 +319,24 @@ class PPoG(
                 rescheduleTimeout()
                 inflightPackets.add(packet)
             }
+
+            // Everything queued has been sent and acked: report what the wire actually managed.
+            if (outboundDataQueue.isEmpty() && inflightPackets.isEmpty()) {
+                val start = burstStart
+                if (start != null) {
+                    val elapsed = start.elapsedNow()
+                    val bytes = burstBytes
+                    if (bytes >= BURST_LOG_MIN_BYTES) {
+                        val ms = elapsed.inWholeMilliseconds
+                        logger.d {
+                            "outbound drained: ${bytes}B in ${ms}ms" +
+                                if (ms > 0) " (${bytes * 1000L / ms} B/s)" else ""
+                        }
+                    }
+                    burstStart = null
+                    burstBytes = 0
+                }
+            }
         }
     }
 
@@ -334,6 +359,9 @@ class PPoG(
         this.mtu = mtu
     }
 }
+
+// Only report bursts big enough to be a transfer; routine chatter is noise.
+private const val BURST_LOG_MIN_BYTES = 2048
 
 private const val DATA_HEADER_OVERHEAD_BYTES = 1 + 3
 private const val MAX_SEQUENCE = 32
