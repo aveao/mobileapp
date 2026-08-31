@@ -7,6 +7,9 @@ package io.rebble.libpebblecommon.imaging
  *
  * Transparency is binary, and costs a palette slot when present. The watch only skips these
  * pixels when it draws with `GCompOpSet`; under the default `GCompOpAssign` they come out black.
+ *
+ * Pixels are matched against what the panel actually shows (see ScreenColors.kt), not the nominal
+ * 0/85/170/255 the GColor8 bits suggest. The bytes on the wire are still GColor8 codes.
  */
 object ImageEncoder {
     private const val MAX_COLORS = 16
@@ -19,9 +22,8 @@ object ImageEncoder {
 
     private fun alphaOf(argb: Int): Int = (argb ushr 24) and 0xFF
 
-    // 8-bit channel (0..255) -> 2-bit GColor8 channel (0..3), rounded to nearest of 0/85/170/255.
+    // 8-bit channel (0..255) -> 2-bit GColor8 channel (0..3).
     private fun quant2(v: Int): Int = (v.coerceIn(0, 255) * 3 + 127) / 255
-    private fun expand2(c: Int): Int = c * 85
     private fun gcolor8(r: Int, g: Int, b: Int): Int = (0x3 shl 6) or (r shl 4) or (g shl 2) or b
 
     private class Color(val r: Int, val g: Int, val b: Int, val count: Int)
@@ -30,9 +32,9 @@ object ImageEncoder {
     fun encode(argb: IntArray, width: Int, height: Int): EncodedImage {
         val hasTransparency = argb.any { alphaOf(it) < OPAQUE_ALPHA }
         val colors = medianCutPalette(argb, if (hasTransparency) MAX_COLORS - 1 else MAX_COLORS)
-        val palR = IntArray(colors.size) { expand2((colors[it] shr 4) and 0x3) }
-        val palG = IntArray(colors.size) { expand2((colors[it] shr 2) and 0x3) }
-        val palB = IntArray(colors.size) { expand2(colors[it] and 0x3) }
+        val palR = IntArray(colors.size) { SCREEN_R[colors[it] and 0x3F] }
+        val palG = IntArray(colors.size) { SCREEN_G[colors[it] and 0x3F] }
+        val palB = IntArray(colors.size) { SCREEN_B[colors[it] and 0x3F] }
         // Past the colours, so `nearest` can never land an opaque black pixel on it.
         val transparentIdx = colors.size
         val palette = if (hasTransparency) colors + TRANSPARENT else colors
