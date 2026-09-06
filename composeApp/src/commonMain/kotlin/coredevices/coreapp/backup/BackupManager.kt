@@ -199,6 +199,9 @@ class BackupManager(
             autoDismissActionNotifications = preferences.autoDismissActionNotifications.value,
             phoneCalendarEnabled = preferences.phoneCalendarEnabled.value,
             platformSttDefaulted = preferences.platformSttDefaulted,
+            backupEnabled = preferences.backupEnabled.value,
+            useEncryption = preferences.useEncryption.value,
+            defaultCaptureType = preferences.defaultCaptureType.value.id,
         )
     }
 
@@ -221,6 +224,9 @@ class BackupManager(
         preferences.setSecondaryModeMcpGroupId(prefs.secondaryModeMcpGroupId)
         preferences.setAutoDismissActionNotifications(prefs.autoDismissActionNotifications)
         preferences.setPhoneCalendarEnabled(prefs.phoneCalendarEnabled)
+        preferences.setBackupEnabled(prefs.backupEnabled)
+        preferences.setUseEncryption(prefs.useEncryption)
+        preferences.setDefaultCaptureType(coredevices.ring.agent.DefaultCaptureType.fromId(prefs.defaultCaptureType))
         // One-way latch; a false value just means it hasn't fired yet.
         if (prefs.platformSttDefaulted) preferences.setPlatformSttDefaulted()
         coredevices.ring.agent.builtin_servlets.reminders.ReminderProvider.fromId(prefs.reminderProvider)

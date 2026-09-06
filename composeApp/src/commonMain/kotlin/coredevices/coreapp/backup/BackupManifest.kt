@@ -1,5 +1,6 @@
 package coredevices.coreapp.backup
 
+import coredevices.ring.agent.DefaultCaptureType
 import coredevices.ring.agent.LlmMode
 import coredevices.ring.agent.builtin_servlets.messaging.ApprovedBeeperContact
 import coredevices.ring.database.MusicControlMode
@@ -33,4 +34,7 @@ data class RingPreferencesExport(
     val autoDismissActionNotifications: Boolean = true,
     val phoneCalendarEnabled: Boolean = false,
     val platformSttDefaulted: Boolean = false,
+    val backupEnabled: Boolean = true,
+    val useEncryption: Boolean = false,
+    val defaultCaptureType: Int = DefaultCaptureType.Note.id,
 )
