@@ -142,14 +142,15 @@ commit on `auto-build`.
 
 ### 5. Verify
 
-If any conflict touched Kotlin or Gradle files, build `auto-build`:
+Build `auto-build` with the same compile surface CI uses, including test source sets; a
+broken test fake compiles fine under `assembleDebug` alone:
 
 ```
-./gradlew :androidApp:assembleDebug
+./gradlew :androidApp:assembleDebug compileAndroidHostTest jvmTestClasses
 ```
 
-If only `.yml`, manifest, or string-only changes were involved, a build is optional. Report
-build failures verbatim; do not paper over them.
+Report build failures verbatim; do not paper over them. If the failure is in code no branch
+touches, it is upstream's: check whether upstream has already pushed a fix and rebase onto that.
 
 ### 6. Report and hand off
 
