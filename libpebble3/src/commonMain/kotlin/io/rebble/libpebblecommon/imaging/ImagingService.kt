@@ -5,12 +5,14 @@ import io.rebble.libpebblecommon.connection.PebbleProtocolHandler
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
 import io.rebble.libpebblecommon.packets.Imaging
 import io.rebble.libpebblecommon.services.ProtocolService
+import io.rebble.libpebblecommon.util.rawDeflate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.TimeSource
 
 /**
  * Generic image-fetch endpoint (0x35). The watch pulls an image; this service answers every request
@@ -37,6 +39,10 @@ class ImagingService(
     // watch, so only one response is on the wire at a time.
     private val sendLock = Mutex()
 
+    // Whether the watch asked for a compressed pixel stream. Latched off the request format for
+    // the life of the connection, since serveImage can deliver an image long after the request.
+    private var watchAcceptsDeflate = false
+
     /**
      * Register the source of images of [type]. Types with no handler are answered UNSUPPORTED, so
      * the watch stops asking for them for the rest of the connection.
@@ -61,12 +67,20 @@ class ImagingService(
             logger.w { "no handler for image type $typeByte token=$token" }
             return sendFlags(token, typeByte, IMAGE_FLAG_UNSUPPORTED)
         }
+        if (Imaging.Format.from(pkt.format.get()) == Imaging.Format.Palette4BitDeflate) {
+            watchAcceptsDeflate = true
+        }
         val width = pkt.width.get().toInt()
         val height = pkt.height.get().toInt()
         if (width !in 1..MAX_DIM || height !in 1..MAX_DIM) {
             logger.w { "image request token=$token out-of-range ${width}x$height; NO_IMAGE" }
             return sendFlags(token, typeByte, IMAGE_FLAG_NO_IMAGE)
         }
+        logger.d {
+            "request token=$token type=$type ${width}x$height format=${pkt.format.get()}" +
+                if (watchAcceptsDeflate) " (watch inflates)" else ""
+        }
+        val start = TimeSource.Monotonic.markNow()
         val image = try {
             handler.image(pkt)
         } catch (e: CancellationException) {
@@ -75,6 +89,10 @@ class ImagingService(
             // A handler failure must not kill this collector for the rest of the connection.
             logger.w(e) { "image handler failed for token=$token (${width}x$height)" }
             null
+        }
+        logger.d {
+            "token=$token image ${if (image == null) "unavailable" else "ready"} after " +
+                "${start.elapsedNow().inWholeMilliseconds}ms"
         }
         serveImage(token, type, image)
     }
@@ -89,9 +107,32 @@ class ImagingService(
         type: Imaging.ImageType,
         image: EncodedImage?,
     ) = sendLock.withLock {
-        val chunks = buildResponse(token, type, image)
-        logger.d { "responding token=$token type=$type: ${chunks.size} chunk(s), hasImage=${image != null}" }
+        val start = TimeSource.Monotonic.markNow()
+        val compressed =
+            if (watchAcceptsDeflate && image != null) rawDeflate(image.pixels) else null
+        val chunks = buildResponse(token, type, image, compressed)
+        val payload = chunks.sumOf { it.body.get().size }
+        val built = start.elapsedNow()
+        logger.d {
+            val pixels = when {
+                image == null -> "no image"
+                compressed != null ->
+                    "${image.pixels.size}B of pixels deflated to ${compressed.size}B"
+                watchAcceptsDeflate ->
+                    "${image.pixels.size}B of pixels sent uncompressed: deflate didn't shrink it"
+                else ->
+                    "${image.pixels.size}B of pixels sent uncompressed: watch didn't ask to inflate"
+            }
+            "responding token=$token type=$type: ${chunks.size} chunk(s), ${payload}B on the wire, " +
+                "$pixels, built in ${built.inWholeMilliseconds}ms"
+        }
         chunks.forEach { protocolHandler.send(it) }
+        // Queued, not transmitted: the outbound channel holds 100 packets, so this returns long
+        // before the bytes reach the watch. PPoG logs the drain that actually costs the time.
+        logger.d {
+            "token=$token queued ${chunks.size} chunk(s) in " +
+                "${(start.elapsedNow() - built).inWholeMilliseconds}ms"
+        }
     }
 
     private suspend fun sendFlags(token: UByte, typeByte: UByte, flags: Int) = sendLock.withLock {
@@ -118,6 +159,7 @@ private const val IMAGE_TYPE_MASK = 0x0F
 
 // Format byte in the image header (must match the firmware's ImagingFormat).
 private const val IMAGE_FORMAT_4BIT_PALETTE = 0x02
+private const val IMAGE_FORMAT_4BIT_PALETTE_DEFLATE = 0x03
 
 // Pixel bytes per chunk; keeps each Pebble Protocol frame around 1 KB.
 private const val IMAGE_CHUNK_PIXELS = 1000
@@ -147,27 +189,37 @@ private fun flagsOnlyBody(token: UByte, typeByte: UByte, flags: Int): UByteArray
 /**
  * Split [image] into Imaging.Response chunks matching the firmware's wire format (after the command
  * byte the packet prepends):
- *   [token u8][flags u8][offset u32 LE][len u16 LE]([w u16][h u16][format u8][paletteCount u8][palette]) [pixels]
+ *   [token u8][flags u8][offset u32 LE][len u16 LE]([w u16][h u16][format u8][paletteCount u8][palette]([deflatedLen u32 LE])) [pixels]
  * The image header (dimensions, format + palette) rides on the first chunk only. A null image (or
  * one with no pixels) yields a single NO_IMAGE chunk so the watch falls back to its text screen.
+ *
+ * When [compressed] is given it is sent in place of the image's own pixels, the format says so,
+ * and its length follows the palette; offsets and chunk lengths then count compressed bytes.
  */
 private fun buildResponse(
     token: UByte,
     type: Imaging.ImageType,
     image: EncodedImage?,
+    compressed: UByteArray?,
 ): List<Imaging.Response> {
     if (image == null || image.pixels.isEmpty()) {
         return listOf(Imaging.Response(flagsOnlyBody(token, type.value, IMAGE_FLAG_NO_IMAGE)))
     }
-    val header = UByteArray(6 + image.palette.size)
+    val pixels = compressed ?: image.pixels
+    val total = pixels.size
+
+    val header = UByteArray(6 + image.palette.size + if (compressed != null) 4 else 0)
     le16(image.width, header, 0)
     le16(image.height, header, 2)
-    header[4] = IMAGE_FORMAT_4BIT_PALETTE.toUByte()
+    header[4] =
+        (if (compressed != null) IMAGE_FORMAT_4BIT_PALETTE_DEFLATE else IMAGE_FORMAT_4BIT_PALETTE)
+            .toUByte()
     header[5] = image.palette.size.toUByte()
     image.palette.copyInto(header, 6)
+    if (compressed != null) {
+        le32(total, header, 6 + image.palette.size)
+    }
 
-    val pixels = image.pixels
-    val total = pixels.size
     val chunks = mutableListOf<Imaging.Response>()
     var offset = 0
     var first = true
