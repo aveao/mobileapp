@@ -14,6 +14,10 @@ internal actual fun getDatabaseBuilder(ctx: AppContext): RoomDatabase.Builder<Da
     )
 }
 
+actual fun getLibPebbleDatabasePath(ctx: AppContext): String {
+    return documentDirectory() + "/$DATABASE_FILENAME"
+}
+
 private fun documentDirectory(): String {
     val documentDirectory = NSFileManager.defaultManager.URLForDirectory(
         directory = NSDocumentDirectory,

@@ -100,6 +100,34 @@ internal class ImageEncoderTest {
     }
 
     @Test
+    fun matchesAgainstScreenColors() {
+        // Cross-check against an independent implementation of the same median cut over the
+        // measured screen colors: a port that silently fell back to nominal matching, or got the
+        // normalization wrong, would choose a different set.
+        val art = ImageEncoder.encode(gradient(64, 64), 64, 64)
+        val expected = listOf(
+            0xC1, 0xE1, 0xD8, 0xC5, 0xD1, 0xF0, 0xE8, 0xC8,
+            0xD2, 0xD5, 0xF4, 0xDC, 0xC6, 0xC2, 0xC9, 0xF1,
+        ).map { it.toUByte() }.toSet()
+        assertEquals(expected, art.palette.toSet())
+    }
+
+    @Test
+    fun orderedDitherLeavesCompressibleRuns() {
+        // The point of the ordered tile over error diffusion: neighbouring pixels of a smooth
+        // image still frequently repeat, which is what the wire's DEFLATE trades on.
+        val art = ImageEncoder.encode(gradient(260, 260), 260, 260)
+        var repeats = 0
+        for (i in 1 until art.pixels.size) {
+            if (art.pixels[i] == art.pixels[i - 1]) repeats++
+        }
+        assertTrue(
+            repeats > art.pixels.size / 2,
+            "expected mostly repeated bytes, got $repeats of ${art.pixels.size}",
+        )
+    }
+
+    @Test
     fun evenPixelIsHighNibble() {
         // 2x1: x=0 black, x=1 white. Black is GColor8 0xC0, white 0xFF.
         val art = ImageEncoder.encode(intArrayOf(argb(0, 0, 0), argb(255, 255, 255)), 2, 1)

@@ -9,6 +9,7 @@ import io.rebble.libpebblecommon.imaging.ImagingService
 import io.rebble.libpebblecommon.imaging.NotificationImageProvider
 import io.rebble.libpebblecommon.packets.Imaging
 import io.rebble.libpebblecommon.imaging.encodeForWatch
+import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -30,12 +31,20 @@ class NotificationImageStore(
     /** @return true if the image is cached, so the watch can be told to expect it. */
     suspend fun put(itemId: Uuid, image: NotificationImage): Boolean = withContext(Dispatchers.IO) {
         try {
+            val start = SystemClock.elapsedRealtime()
+            logger.d { "notification image received for $itemId: ${image.width}x${image.height}" }
             val bitmap = image.decode(context) ?: return@withContext false
+            val decodedAt = SystemClock.elapsedRealtime()
             dir.mkdirs()
             fileFor(itemId).outputStream().use {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it)
             }
-            logger.v { "cached ${bitmap.width}x${bitmap.height} image for $itemId" }
+            val bytes = fileFor(itemId).length()
+            logger.d {
+                "cached ${bitmap.width}x${bitmap.height} image for $itemId: ${bytes}B, " +
+                    "${decodedAt - start}ms decode, " +
+                    "${SystemClock.elapsedRealtime() - decodedAt}ms jpeg"
+            }
             prune()
             true
         } catch (e: Exception) {
@@ -53,9 +62,18 @@ class NotificationImageStore(
     }
 
     private suspend fun image(itemId: Uuid, width: Int, height: Int): EncodedImage? {
+        val start = SystemClock.elapsedRealtime()
         val bitmap = withContext(Dispatchers.IO) {
             fileFor(itemId).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path) }
-        } ?: return null
+        }
+        if (bitmap == null) {
+            logger.d { "no cached image for $itemId" }
+            return null
+        }
+        logger.d {
+            "loaded cached ${bitmap.width}x${bitmap.height} image for $itemId in " +
+                "${SystemClock.elapsedRealtime() - start}ms"
+        }
         return withContext(Dispatchers.Default) { bitmap.encodeForWatch(width, height) }
     }
 
